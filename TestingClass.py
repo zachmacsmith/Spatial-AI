@@ -15,6 +15,7 @@ from config import ANTHROPIC_API_KEY
 client = Anthropic(api_key=ANTHROPIC_API_KEY)
 
 
+
 # ----------------------------
 # 2. User-defined actions
 # ----------------------------
@@ -83,8 +84,7 @@ def ask_claude_multiframe(frames, prompt_text):
 # ----------------------------
 frame_cache = {}
 def get_frame(video_path, frame_number):
-   cache_key = (video_path, frame_number)
-   if cache_key in frame_cache:
+   if frame_number in frame_cache:
        return frame_cache[frame_number]
    cap = cv2.VideoCapture(video_path)
    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number - 1)
@@ -169,12 +169,18 @@ def process_video(video_name):
     # ----------------------------
     # 7. Process keyframes (multithreaded)
     # ----------------------------
-    video_path = "videos/" + video_name + ".mp4"
+    
+    # TODO: change video directory back to original
+    
+    video_path = "videos" + video_name + ".mp4"
     keyframes_folder = "keyframes/keyframes" + video_name
     keyframe_files = sorted(os.listdir(keyframes_folder), key=lambda x: int(x.rstrip('.jpg')))
     frame_count = int(cv2.VideoCapture(video_path).get(cv2.CAP_PROP_FRAME_COUNT))
     frame_labels = [""] * frame_count
 
+    # Cache is defined every time this function is run, to ensure frame cache resets for each video. 
+    global frame_cache
+    frame_cache = {}
 
     def process_keyframe(kf_file):
        kf_number = int(kf_file.rstrip(".jpg"))
@@ -263,6 +269,7 @@ def process_video(video_name):
     width = int(cap_playback.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap_playback.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    # TODO: change save directory back to original
     out_path = "Outputs/labeled_output" + video_path
     out = cv2.VideoWriter(out_path, fourcc, fps, (width, height))
 
