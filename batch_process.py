@@ -11,10 +11,22 @@ videos_to_process = [
     "video_05"
 ]
 
+# Ask which processing mode to use
+use_objects = input("Use object identification? (Y/N): ").strip().upper()
+
+if use_objects == 'Y':
+    from TestingClass2 import process_video
+    processing_mode = "with object identification"
+else:
+    from TestingClass import process_video
+    processing_mode = "without object identification"
+
+print(f"\nRunning {processing_mode}")
+
 # Ask if user wants to examine videos folder
 examine = input("Examine videos folder to select files? (Y/N): ").strip().upper()
 
-if examine == 'Y':
+if examine == 'Y' or examine == 'A':
     videos_folder = "videos"
     
     # Find all video files
@@ -23,21 +35,32 @@ if examine == 'Y':
     
     print(f"\nFound {len(video_files)} videos in {videos_folder}/")
     print()
-    
-    # Ask Y/N for each video
-    videos_to_process = []
-    for video_name in video_files:
-        # Check if keyframes exist
-        keyframes_folder = f"keyframes/keyframes{video_name}"
-        has_keyframes = os.path.exists(keyframes_folder) and len(os.listdir(keyframes_folder)) > 0
-        
-        if not has_keyframes:
-            print(f"⚠️  {video_name} - no keyframes found, skipping")
-            continue
+    if examine == 'A':
+        # Process all videos with keyframes
+        for video_name in video_files:
+            keyframes_folder = f"keyframes/keyframes{video_name}"
+            has_keyframes = os.path.exists(keyframes_folder) and len(os.listdir(keyframes_folder)) > 0
             
-        response = input(f"Include {video_name}? (Y/N): ").strip().upper()
-        if response == 'Y':
-            videos_to_process.append(video_name)
+            if has_keyframes:
+                videos_to_process.append(video_name)
+                print(f"✓ {video_name} - added to queue")
+            else:
+                print(f"⚠️  {video_name} - no keyframes found, skipping")
+    else:
+        # Ask Y/N for each video
+        videos_to_process = []
+        for video_name in video_files:
+            # Check if keyframes exist
+            keyframes_folder = f"keyframes/keyframes{video_name}"
+            has_keyframes = os.path.exists(keyframes_folder) and len(os.listdir(keyframes_folder)) > 0
+            
+            if not has_keyframes:
+                print(f"⚠️  {video_name} - no keyframes found, skipping")
+                continue
+                
+            response = input(f"Include {video_name}? (Y/N): ").strip().upper()
+            if response == 'Y':
+                videos_to_process.append(video_name)
     
     if not videos_to_process:
         print("No videos selected")
@@ -64,7 +87,7 @@ if os.path.exists(timing_file):
 else:
     batch_number = 1
 
-print(f"\nBatch number: {batch_number}")
+print(f"\nBatch number: {batch_number} ({processing_mode})")
 
 # Open timing file for appending
 file_exists = os.path.exists(timing_file)

@@ -11,7 +11,7 @@ from threading import local
 
 video_directory = "videos/"
 keyframes_directory = "keyframes/keyframes"
-video_output_directory = "Outputs/vid_objs"
+video_output_directory = "Outputs/vid_objs/"
 csv_directory = "Outputs/Data2/"
 video_default = "video_05"
 
@@ -148,7 +148,7 @@ def motion_score(frames, ignore_threshold=5):
 try:
     font = ImageFont.truetype("arial.ttf", 36)
 except:
-    font = ImageFont.load_default()
+    font = ImageFont.load_default(500)
 
 def overlay_action(frame, label):
     img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
@@ -206,7 +206,7 @@ def process_video(video_name):
         print(f"Keyframe {kf_number}: {label}")
         return kf_number, label
 
-    with ThreadPoolExecutor(max_workers=8) as executor:
+    with ThreadPoolExecutor(max_workers=4) as executor:
         keyframe_results = list(executor.map(process_keyframe, keyframe_files))
 
     keyframe_results.sort(key=lambda x: x[0])
@@ -258,7 +258,7 @@ def process_video(video_name):
 
         return start, end, label
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    with ThreadPoolExecutor(max_workers=2) as executor:
         interval_results = list(executor.map(process_interval, range(len(keyframe_numbers) - 1)))
 
     for start, end, label in interval_results:
@@ -359,7 +359,7 @@ def process_video(video_name):
 
     print(f"Saved labels to {csv_path}")
 
-    return csv_path2
+    return csv_path
 
 if __name__ == "__main__":
     video_name = video_default
