@@ -83,7 +83,8 @@ def ask_claude_multiframe(frames, prompt_text):
 # ----------------------------
 frame_cache = {}
 def get_frame(video_path, frame_number):
-   if frame_number in frame_cache:
+   cache_key = (video_path, frame_number)
+   if cache_key in frame_cache:
        return frame_cache[frame_number]
    cap = cv2.VideoCapture(video_path)
    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number - 1)
