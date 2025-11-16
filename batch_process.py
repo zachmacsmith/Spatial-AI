@@ -74,12 +74,38 @@ if confirm != 'Y':
     print("Cancelled")
     exit()
 
-# Determine batch number
+# Get batch note
+batch_note = input("Enter batch note (optional, press Enter to skip): ").strip()
+
+# Determine batch number and handle CSV migration
 timing_file = 'Outputs/timing_results.csv'
 os.makedirs('Outputs', exist_ok=True)
 
 if os.path.exists(timing_file):
-    # Read existing file to find max batch number
+    # Check if CSV needs migration (missing batch_note column)
+    with open(timing_file, 'r') as f:
+        first_line = f.readline().strip()
+        needs_migration = 'batch_note' not in first_line
+    
+    if needs_migration:
+        print("\nMigrating CSV to include batch_note column...")
+        # Read all existing rows
+        with open(timing_file, 'r') as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+        
+        # Add batch_note to header and empty values to all data rows
+        rows[0].append('batch_note')
+        for i in range(1, len(rows)):
+            rows[i].append('')
+        
+        # Write back
+        with open(timing_file, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerows(rows)
+        print("Migration complete.")
+    
+    # Read to find max batch number
     with open(timing_file, 'r') as f:
         reader = csv.DictReader(f)
         batches = [int(row['batch']) for row in reader]
@@ -88,6 +114,8 @@ else:
     batch_number = 1
 
 print(f"\nBatch number: {batch_number} ({processing_mode})")
+if batch_note:
+    print(f"Batch note: {batch_note}")
 
 # Open timing file for appending
 file_exists = os.path.exists(timing_file)
@@ -95,7 +123,7 @@ timing_file_handle = open(timing_file, 'a', newline='')
 timing_writer = csv.writer(timing_file_handle)
 
 if not file_exists:
-    timing_writer.writerow(['batch', 'timestamp', 'video_name', 'video_duration_sec', 'processing_time_sec', 'processing_time_min', 'speed_ratio'])
+    timing_writer.writerow(['batch', 'timestamp', 'video_name', 'video_duration_sec', 'processing_time_sec', 'processing_time_min', 'speed_ratio', 'batch_note'])
 
 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 timing_results = {}
@@ -134,7 +162,8 @@ for i, video_name in enumerate(videos_to_process, 1):
             video_duration,
             processing_time,
             processing_time/60,
-            speed_ratio
+            speed_ratio,
+            batch_note
         ])
         timing_file_handle.flush()  # Ensure it's written immediately
         
