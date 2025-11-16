@@ -61,7 +61,6 @@ def get_color_for_class(class_name, all_class_names):
         get_color_for_class.color_map = {}
 
     if class_name not in get_color_for_class.color_map:
-        # Generate evenly distributed colors using HSV
         num_classes = len(all_class_names)
         class_idx = list(all_class_names).index(class_name) if class_name in all_class_names else len(
             get_color_for_class.color_map)
@@ -82,49 +81,37 @@ class RelationshipTracker:
 
         # Active relationships: key = frozenset of object names, value = start_frame
         self.active_relationships = {}
-
         # Completed relationships: list of {objects: set, start_frame, end_frame}
         self.completed_relationships = []
 
     def get_box_center(self, box):
-        """Get center point of bounding box."""
         x1, y1, x2, y2 = box
         return ((x1 + x2) / 2, (y1 + y2) / 2)
 
     def get_distance(self, center1, center2):
-        """Calculate Euclidean distance between two centers."""
+        """Calculate distance between two centers."""
         return np.sqrt((center1[0] - center2[0]) ** 2 + (center1[1] - center2[1]) ** 2)
 
     def find_relationships(self, detections, frame_width, current_frame):
-        """
-        Find relationships between objects in current frame.
-        detections: list of (box, class_name, confidence)
-        Returns: list of relationships (sets of object names) and line drawing info
-        """
         proximity_threshold = frame_width * self.proximity_threshold_percent
-
         if len(detections) < 2:
             return [], []
-
         # Calculate centers for all detections
         centers = [(self.get_box_center(det[0]), det[1]) for det in detections]
-
         # Build adjacency: which objects are close to each other
         n = len(centers)
         adjacency = [[] for _ in range(n)]
-
         for i in range(n):
             for j in range(i + 1, n):
                 dist = self.get_distance(centers[i][0], centers[j][0])
                 if dist <= proximity_threshold:
                     adjacency[i].append(j)
                     adjacency[j].append(i)
-
         # Find connected components (groups of close objects)
         visited = [False] * n
         relationships = []
 
-        def dfs(node, component):
+        def dfs(node, component):    #depth first search
             visited[node] = True
             component.add(node)
             for neighbor in adjacency[node]:
@@ -141,7 +128,6 @@ class RelationshipTracker:
         # Convert indices to object names and prepare line drawing info
         relationship_sets = []
         line_info = []
-
         for component in relationships:
             obj_names = frozenset(centers[idx][1] for idx in component)
             relationship_sets.append(obj_names)
@@ -196,7 +182,7 @@ class RelationshipTracker:
         self.active_relationships.clear()
 
     def get_relationships_csv_data(self):
-        """Get relationship data formatted for CSV output."""
+        """Get relationship data formatted for CSV output"""
         return self.completed_relationships
 
 
@@ -223,8 +209,6 @@ def set_actions(action_list):
         f"You must classify the person's behavior into ONE of the following categories: "
         f"{actions_joined}. Respond ONLY with one word from this list, no explanations."
     )
-
-
 set_actions(["using tool", "idle", "moving"])
 
 
@@ -337,7 +321,7 @@ def motion_score(frames, ignore_threshold=5):
 # Overlay text
 # ----------------------------
 try:
-    font = ImageFont.truetype("arial.ttf", 36)
+    font = ImageFont.truetype("arial.ttf", 102)
 except:
     font = ImageFont.load_default()
 
@@ -611,7 +595,6 @@ def process_video(video_name):
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out_path = video_output_directory + video_name + ".mp4"
     out = cv2.VideoWriter(out_path, fourcc, fps, (width, height))
-
     model = get_local_model()
     latest_boxes = None
     latest_detections = []
@@ -632,7 +615,6 @@ def process_video(video_name):
             for box, cls_id, conf in zip(results.boxes.xyxy, results.boxes.cls, results.boxes.conf):
                 class_name = results.names[int(cls_id)]
                 latest_detections.append((box.cpu().numpy(), class_name, float(conf)))
-
             objects = get_objects(frame)
             tool = None
             for o in objects:
@@ -668,7 +650,6 @@ def process_video(video_name):
                 if tool:
                     label = f"using {tool}"
             frame_with_boxes = overlay_action(frame_with_boxes, label)
-
         out.write(frame_with_boxes)
 
     cap_playback.release()
@@ -683,7 +664,6 @@ def process_video(video_name):
     total_duration = frame_count / fps
     with open(csv_path, 'w') as f:
         f.write(f"{fps},{total_duration}\n")
-
         if frame_count > 0:
             current_label = frame_labels[0]
             f.write(f"1,{current_label}\n")
@@ -698,7 +678,6 @@ def process_video(video_name):
     # Save relationships CSV
     relationships_csv_path = csv_directory + video_name + "_relationships.csv"
     relationships_data = relationship_tracker.get_relationships_csv_data()
-
     with open(relationships_csv_path, 'w') as f:
         f.write("start_frame,end_frame,start_time,end_time,duration,objects\n")
         for rel in relationships_data:
@@ -713,7 +692,7 @@ def process_video(video_name):
     print(f"Total relationships recorded: {len(relationships_data)}")
 
     # ----------------------------
-    # Generate Productivity Analysis (if enabled)
+    # Generate Productivity Analysis (if set to True)
     # ----------------------------
     if ENABLE_PRODUCTIVITY_ANALYSIS:
         try:
@@ -727,9 +706,7 @@ def process_video(video_name):
             print(f"✗ Error generating productivity analysis: {e}")
             import traceback
             traceback.print_exc()
-
     return csv_path
-
 
 if __name__ == "__main__":
     video_name = video_default
