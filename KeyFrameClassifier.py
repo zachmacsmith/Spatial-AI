@@ -7,8 +7,8 @@ import matplotlib.pyplot as plt
 # -----------------------------
 # CONFIG
 # -----------------------------
-VIDEO_NAME = "video_10"
-VIDEO_PATH = VIDEO_NAME + ".mp4"
+VIDEO_NAME = "video_18"
+VIDEO_PATH = "videos/" + VIDEO_NAME + ".mp4"
 SAVE_DIR = "keyframes/keyframes" + VIDEO_NAME
 os.makedirs(SAVE_DIR, exist_ok=True)
 SCALE = 0.5          # resize frames for speed

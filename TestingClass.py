@@ -276,7 +276,7 @@ def process_video(video_name):
     height = int(cap_playback.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     # TODO: change save directory back to original
-    out_path = video_output_directory + video_path
+    out_path = video_output_directory + video_name + ".mp4"
     out = cv2.VideoWriter(out_path, fourcc, fps, (width, height))
 
 

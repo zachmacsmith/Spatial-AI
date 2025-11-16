@@ -1,39 +1,58 @@
-﻿Video ID,Start,Moving,Object,Using
-1,0:00,N,Measure,Y
-1,0:05,Y,N,
-1,0:09,Y,Saw,N
-1,0:14,N,Saw,Y
-1,0:17,Y,Saw,N
-2,0:00,N,Hammer,Y
-2,0:08,N,Wood,N
-2,0:11,Y,Wood,N
-2,0:15,N,N,N
-2,0:18,N,Measure,Y
-2,0:27,Y,N,
-5,0:00,N,N,
-5,0:03,N,Culk,N
-5,0:04,Y,Culk,N
-5,0:09,N,Culk,Y
-5,0:14,N,Culk,N
-5,0:18,N,N,
-5,0:19,Y,N,
-8,0:00,N,N,
-8,0:05,Y,N,
-11,0:00,Y,N,
-11,0:02,N,Measure,Y
-11,0:09,N,N,
-12,0:00,N,Concrete,Y
-13,0:00,N,Concrete,N
-13,0:03,N,Concrete,Y
-13,0:05,N,Conrete,N
-13,0:20,N,Concrete,Y
-13,0:22,N,Concrete,N
-13,0:25,N,Concerete,Y
-14,0:00,N,Concete,Y
-21,0:00,Y,N,
-21,0:01,N,Measure,Y
-21,0:05,N,Wood,Y
-21,0:06,N,Saw,Y
-21,0:09,Y,Wood,N
-22,0:00,N,N,
-23,0:05,N,Measure,Y
+Video ID,Timestamp,State,Object
+1,0:00,using tool,Measure
+1,0:02,using tool,Pencil
+1,0:03,moving,
+1,0:08,using tool,Saw
+1,0:09,moving,
+1,0:12,using tool,Saw
+1,0:17,moving,
+4,0:00,using tool,Brick trowel
+4,0:02,using tool,Brick
+4,0:04,using tool,Brick trowel
+4,0:05,using tool,Brick
+4,0:07,using tool,Brick trowel
+4,0:09,using tool,Brick
+4,0:10,using tool,Brick trowel
+4,0:11,moving,
+4,0:14,using tool,Brick trowel
+4,0:16,using tool,Brick
+4,0:17,using tool,Brick trowel
+4,0:19,using tool,Brick trowel
+5,0:01,using tool,Caulk gun
+5,0:04,idle,
+5,0:08,using tool,Caulk gun
+5,0:14,idle,
+5,0:15,using tool,Caulk gun
+5,0:18,moving,
+11,0:00,using tool,Measure
+16,0:00,using tool,Measure
+16,0:01,using tool,Pencil
+16,0:05,moving,
+16,0:07,idle,
+16,0:11,moving,
+16,0:13,using tool,Caulk gun
+17,0:00,using tool,Measure
+17,0:03,using tool,Unknown
+17,0:05,using tool,Measure
+17,0:07,using tool,Pencil
+18,0:00,using tool,Brick trowel
+18,0:01,moving,
+18,0:02,using tool,Brick
+18,0:03,using tool,Brick trowel
+18,0:05,using tool,Brick
+18,0:06,using tool,Brick trowel
+18,0:08,using tool,Brick
+18,0:09,using tool,Brick trowel
+18,0:10,using tool,Brick trowel
+18,0:11,using tool,Brick
+18,0:13,using tool,Brick trowel
+21,0:00,idle,
+21,0:01,using tool,Measure
+21,0:03,using tool,Pencil
+21,0:04,using tool,Unknown (wooden bar)
+21,0:06,using tool,Saw
+21,0:08,using tool,Unknown (wooden bar)
+21,0:10,idle,
+22,0:00,idle,
+22,0:04,using tool,Measure
+22,0:13,using tool,Unknown
