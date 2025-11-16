@@ -9,6 +9,12 @@ from concurrent.futures import ThreadPoolExecutor
 from ultralytics import YOLO
 from threading import local
 
+video_directory = "videos/"
+keyframes_directory = "keyframes/keyframes"
+video_output_directory = "Outputs/vid_objs"
+csv_directory = "Outputs/Data2/"
+video_default = "video_05"
+
 # ----------------------------
 # Module-level setup
 # ----------------------------
@@ -171,8 +177,8 @@ def process_video(video_name):
     global frame_cache
     frame_cache = {}
     
-    video_path = "videos/" + video_name + ".mp4"
-    keyframes_folder = "keyframes/keyframes" + video_name
+    video_path = video_directory + video_name + ".mp4"
+    keyframes_folder = keyframes_directory + video_name
     keyframe_files = sorted(os.listdir(keyframes_folder), key=lambda x: int(x.rstrip('.jpg')))
     
     # Pre-load all frames into cache
@@ -292,7 +298,7 @@ def process_video(video_name):
     width = int(cap_playback.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap_playback.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out_path = "Outputs/labeled_" + video_name + ".mp4"
+    out_path = video_output_directory + video_name + ".mp4"
     out = cv2.VideoWriter(out_path, fourcc, fps, (width, height))
     
     model = get_local_model()
@@ -337,7 +343,7 @@ def process_video(video_name):
     print(f"Saved labeled video to {out_path}")
     
     # Save CSV with state changes
-    csv_path = "Outputs/Data/" + video_name + ".csv"
+    csv_path = csv_directory + video_name + ".csv"
     total_duration = frame_count / fps
     with open(csv_path, 'w') as f:
         f.write(f"{fps},{total_duration}\n")
@@ -356,5 +362,5 @@ def process_video(video_name):
     return csv_path2
 
 if __name__ == "__main__":
-    video_name = "video_05"
+    video_name = video_default
     process_video(video_name)

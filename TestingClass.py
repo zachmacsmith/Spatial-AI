@@ -8,6 +8,12 @@ from difflib import get_close_matches
 from concurrent.futures import ThreadPoolExecutor
 
 
+video_directory = "videos/"
+keyframes_directory = "keyframes/keyframes"
+video_output_directory = "Outputs/vid/labeled_output"
+csv_directory = "Outputs/Data/"
+video_default = "video_05"
+
 # ----------------------------
 # 1. Claude client
 # ----------------------------
@@ -172,8 +178,8 @@ def process_video(video_name):
     
     # TODO: change video directory back to original
     
-    video_path = "videos" + video_name + ".mp4"
-    keyframes_folder = "keyframes/keyframes" + video_name
+    video_path = video_directory + video_name + ".mp4"
+    keyframes_folder = keyframes_directory + video_name
     keyframe_files = sorted(os.listdir(keyframes_folder), key=lambda x: int(x.rstrip('.jpg')))
     frame_count = int(cv2.VideoCapture(video_path).get(cv2.CAP_PROP_FRAME_COUNT))
     frame_labels = [""] * frame_count
@@ -270,7 +276,7 @@ def process_video(video_name):
     height = int(cap_playback.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     # TODO: change save directory back to original
-    out_path = "Outputs/labeled_output" + video_path
+    out_path = video_output_directory + video_path
     out = cv2.VideoWriter(out_path, fourcc, fps, (width, height))
 
 
@@ -288,7 +294,7 @@ def process_video(video_name):
     print(f"Saved labeled video to {out_path}")
 
     # Save CSV with state changes (frame, label)
-    csv_path = "Outputs/Data/" + video_name + ".csv"
+    csv_path = csv_directory + video_name + ".csv"
     total_duration = frame_count / fps  # Calculate total duration
     with open(csv_path, 'w') as f:
         f.write(f"{fps},{total_duration}\n")
