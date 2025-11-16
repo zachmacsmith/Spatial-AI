@@ -1,0 +1,7 @@
+config.py
+*.pyc
+__pycache__/
+*.mp4
+*.jpg
+Outputs/
+keyframes/
