@@ -3,6 +3,7 @@ import time
 import csv
 from datetime import datetime
 from TestingClass import process_video
+from KeyFrameClassifier import process_video as generate_keyframes
 
 # Default videos to process (used if user doesn't examine folder)
 videos_to_process = [
@@ -45,7 +46,8 @@ if examine == 'Y' or examine == 'A':
                 videos_to_process.append(video_name)
                 print(f"✓ {video_name} - added to queue")
             else:
-                print(f"⚠️  {video_name} - no keyframes found, skipping")
+                videos_to_process.append(video_name)
+                print(f"✓ {video_name} - added to queue (will generate keyframes)")
     else:
         # Ask Y/N for each video
         videos_to_process = []
@@ -55,8 +57,7 @@ if examine == 'Y' or examine == 'A':
             has_keyframes = os.path.exists(keyframes_folder) and len(os.listdir(keyframes_folder)) > 0
             
             if not has_keyframes:
-                print(f"⚠️  {video_name} - no keyframes found, skipping")
-                continue
+                print(f"⚠️  {video_name} - no keyframes found (will be generated)")
                 
             response = input(f"Include {video_name}? (Y/N): ").strip().upper()
             if response == 'Y':
@@ -76,6 +77,9 @@ if confirm != 'Y':
 
 # Get batch note
 batch_note = input("Enter batch note (optional, press Enter to skip): ").strip()
+
+# Ask if user wants to benchmark after processing
+run_benchmark_flag = input("Run benchmark after processing? (Y/N): ").strip().upper()
 
 # Determine batch number and handle CSV migration
 timing_file = 'Outputs/timing_results.csv'
@@ -137,6 +141,12 @@ for i, video_name in enumerate(videos_to_process, 1):
     start_time = time.time()
     
     try:
+        # Check/Generate keyframes
+        keyframes_folder = f"keyframes/keyframes{video_name}"
+        if not os.path.exists(keyframes_folder) or len(os.listdir(keyframes_folder)) == 0:
+             print(f"Generating keyframes for {video_name}...")
+             generate_keyframes(video_name)
+
         csv_path = process_video(video_name)
         
         end_time = time.time()
@@ -203,4 +213,58 @@ if timing_results:
 
 print("\n" + "="*50)
 print("Batch processing complete!")
+print("="*50)
+
+# Run benchmark if requested
+if run_benchmark_flag == 'Y':
+    print("\n" + "="*50)
+    print("Starting Benchmark")
+    print("="*50)
+    
+    from Benchmark import run_benchmark
+    
+    # Determine which model data directory to use
+    if use_objects == 'Y':
+        model_data_dir = "Outputs/Data2/"
+    else:
+        model_data_dir = "Outputs/Data/"
+    
+    # Get benchmark metadata
+    benchmark_batch_name = input("\nBenchmark batch name: ").strip()
+    if not benchmark_batch_name:
+        benchmark_batch_name = f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    
+    model_version = input("Model version (e.g., TestingClass2_v1): ").strip()
+    if not model_version:
+        if use_objects == 'Y':
+            model_version = "TestingClass2"
+        else:
+            model_version = "TestingClass"
+    
+    benchmark_notes = input("Benchmark notes (optional): ").strip()
+    
+    # Run benchmark
+    try:
+        results = run_benchmark(
+            videos_to_process=videos_to_process,
+            batch_name=benchmark_batch_name,
+            model_version=model_version,
+            notes=benchmark_notes,
+            model_data_dir=model_data_dir
+        )
+        
+        if results:
+            print("\n" + "="*50)
+            print("BENCHMARK COMPLETE")
+            print("="*50)
+            print(f"Average state accuracy: {results['avg_state_accuracy']:.2%}")
+            if results['avg_object_accuracy'] is not None:
+                print(f"Average object accuracy: {results['avg_object_accuracy']:.2%}")
+    except Exception as e:
+        print(f"\n✗ Benchmark failed: {e}")
+        import traceback
+        traceback.print_exc()
+
+print("\n" + "="*50)
+print("All processing complete!")
 print("="*50)

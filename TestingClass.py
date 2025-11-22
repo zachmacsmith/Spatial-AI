@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 video_directory = "videos/"
 keyframes_directory = "keyframes/keyframes"
-video_output_directory = "Outputs/vid/labeled_output"
+video_output_directory = "Outputs/"
 csv_directory = "Outputs/Data/"
 video_default = "video_05"
 
@@ -26,8 +26,6 @@ client = Anthropic(api_key=ANTHROPIC_API_KEY)
 # 2. User-defined actions
 # ----------------------------
 def set_actions(action_list):
-
-
    global ALLOWED_ACTIONS, ACTION_PROMPT
    ALLOWED_ACTIONS = [a.lower() for a in action_list]
    actions_joined = ", ".join(ALLOWED_ACTIONS)
@@ -39,6 +37,9 @@ def set_actions(action_list):
 
 # Example: Replace with user input or CLI
 set_actions(["using tool", "idle", "moving"])
+
+# Define allowed tools
+ALLOWED_TOOLS = ["pencil", "saw", "measuring tape", "caulk gun", "unknown"]
 
 
 # ----------------------------
@@ -83,6 +84,42 @@ def ask_claude_multiframe(frames, prompt_text):
        if action in text:
            return action
    return ALLOWED_ACTIONS[0]  # fallback
+
+
+# ----------------------------
+# 4b. Ask Claude which tool is being used
+# ----------------------------
+def ask_claude_which_tool(frames):
+    """Ask Claude to identify which tool from the allowed list is being used."""
+    content_list = [
+        {
+            "type": "image",
+            "source": {"type": "base64", "media_type": "image/jpeg", "data": encoded}
+        }
+        for encoded in encode_frames(frames)
+    ]
+    
+    tools_list = ", ".join(ALLOWED_TOOLS)
+    content_list.append({
+        "type": "text",
+        "text": f"Which tool is the person using? Choose ONLY ONE from this list: {tools_list}. Respond with ONLY the tool name, no explanations."
+    })
+
+    response = client.messages.create(
+        model="claude-sonnet-4-5-20250929",
+        max_tokens=50,
+        messages=[{"role": "user", "content": content_list}]
+    )
+    text = response.content[0].text.strip().lower()
+    
+    # Match closest tool
+    match = get_close_matches(text, ALLOWED_TOOLS, n=1)
+    if match:
+        return match[0]
+    for tool in ALLOWED_TOOLS:
+        if tool in text:
+            return tool
+    return "unknown"  # fallback
 
 
 # ----------------------------
@@ -183,6 +220,7 @@ def process_video(video_name):
     keyframe_files = sorted(os.listdir(keyframes_folder), key=lambda x: int(x.rstrip('.jpg')))
     frame_count = int(cv2.VideoCapture(video_path).get(cv2.CAP_PROP_FRAME_COUNT))
     frame_labels = [""] * frame_count
+    frame_tools = [""] * frame_count  # Track which tool is being used
 
     # Cache is defined every time this function is run, to ensure frame cache resets for each video. 
     global frame_cache
@@ -193,8 +231,16 @@ def process_video(video_name):
        frame = get_frame(video_path, kf_number)
        prompt = f"This is a POV of a person. Check if hands are visible. {ACTION_PROMPT}"
        label = ask_claude_multiframe([frame], prompt)
-       print(f"Keyframe {kf_number}: {label}")
-       return kf_number, label
+       
+       # If using tool, ask which tool
+       tool = ""
+       if label == "using tool":
+           tool = ask_claude_which_tool([frame])
+           print(f"Keyframe {kf_number}: {label} - {tool}")
+       else:
+           print(f"Keyframe {kf_number}: {label}")
+       
+       return kf_number, label, tool
 
 
     with ThreadPoolExecutor(max_workers=4) as executor:
@@ -203,8 +249,9 @@ def process_video(video_name):
 
     keyframe_results.sort(key=lambda x: x[0])
     keyframe_numbers = []
-    for kf_number, label in keyframe_results:
+    for kf_number, label, tool in keyframe_results:
        frame_labels[kf_number - 1] = label
+       frame_tools[kf_number - 1] = tool
        keyframe_numbers.append(kf_number)
 
 
@@ -229,22 +276,30 @@ def process_video(video_name):
        print(motion)
        prompt = f"This is a POV of a person. Motion score: {motion:.2f}, a motion score of 0-0.16 suggests the person is idle, 10 or above suggests they are moving. Check if hands are visible and classify behavior. {ACTION_PROMPT}"
        label = ask_claude_multiframe(frames_to_send, prompt)
-       return start, end, label
+       
+       # If using tool, ask which tool
+       tool = ""
+       if label == "using tool":
+           tool = ask_claude_which_tool(frames_to_send)
+       
+       return start, end, label, tool
 
 
     with ThreadPoolExecutor(max_workers=2) as executor:
        interval_results = list(executor.map(process_interval, range(len(keyframe_numbers)-1)))
 
 
-    for start, end, label in interval_results:
+    for start, end, label, tool in interval_results:
        for f in range(start, end):
            frame_labels[f] = label
+           frame_tools[f] = tool
 
 
     # Fill after last keyframe
     last_kf = keyframe_numbers[-1]
     for f in range(last_kf, frame_count):
        frame_labels[f] = frame_labels[last_kf - 1]
+       frame_tools[f] = frame_tools[last_kf - 1]
 
 
     # ----------------------------
@@ -252,6 +307,8 @@ def process_video(video_name):
     # ----------------------------
     window = 9
     smoothed_labels = frame_labels.copy()
+    smoothed_tools = frame_tools.copy()
+    
     for i in range(frame_count):
        start = max(0, i - window)
        end = min(frame_count, i + window)
@@ -264,7 +321,20 @@ def process_video(video_name):
            smoothed_labels[i] = ALLOWED_ACTIONS[0]
        else:
            smoothed_labels[i] = max(counts, key=counts.get)
+       
+       # For tools, use most common tool in window when state is "using tool"
+       if smoothed_labels[i] == "using tool":
+           tool_counts = {}
+           for j in range(start, end):
+               if frame_labels[j] == "using tool" and frame_tools[j]:
+                   tool_counts[frame_tools[j]] = tool_counts.get(frame_tools[j], 0) + 1
+           if tool_counts:
+               smoothed_tools[i] = max(tool_counts, key=tool_counts.get)
+       else:
+           smoothed_tools[i] = ""
+    
     frame_labels = smoothed_labels
+    frame_tools = smoothed_tools
 
 
     # ----------------------------
@@ -285,7 +355,10 @@ def process_video(video_name):
        if not ret:
            break
        if frame_labels[i]:
-           frame = overlay_action(frame, frame_labels[i])
+           label_text = frame_labels[i]
+           if frame_labels[i] == "using tool" and frame_tools[i]:
+               label_text = f"using {frame_tools[i]}"
+           frame = overlay_action(frame, label_text)
        out.write(frame)
 
 
@@ -293,7 +366,7 @@ def process_video(video_name):
     out.release()
     print(f"Saved labeled video to {out_path}")
 
-    # Save CSV with state changes (frame, label)
+    # Save CSV with state changes (frame, label, object)
     csv_path = csv_directory + video_name + ".csv"
     total_duration = frame_count / fps  # Calculate total duration
     with open(csv_path, 'w') as f:
@@ -301,12 +374,14 @@ def process_video(video_name):
         
         if frame_count > 0:
             current_label = frame_labels[0]
-            f.write(f"1,{current_label}\n")  # First frame
+            current_tool = frame_tools[0]
+            f.write(f"1,{current_label},{current_tool}\n")  # First frame
             
             for i in range(1, frame_count):
-                if frame_labels[i] != current_label:
+                if frame_labels[i] != current_label or frame_tools[i] != current_tool:
                     current_label = frame_labels[i]
-                    f.write(f"{i+1},{current_label}\n")  # Frame where change occurs
+                    current_tool = frame_tools[i]
+                    f.write(f"{i+1},{current_label},{current_tool}\n")  # Frame where change occurs
             
     print(f"Saved labels to {csv_path}")
     
@@ -314,5 +389,5 @@ def process_video(video_name):
 
 # CHANGE: Added if __name__ block
 if __name__ == "__main__":
-    video_name = "video_03"
+    video_name = video_default
     process_video(video_name)

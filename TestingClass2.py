@@ -290,6 +290,33 @@ def process_video(video_name):
             smoothed_labels[i] = max(counts, key=counts.get)
     frame_labels = smoothed_labels
 
+    # After temporal smoothing, before "Save labeled video"
+    # ----------------------------
+    # Detect tools for each frame
+    # ----------------------------
+    frame_tools = [""] * frame_count
+    model = get_local_model()
+
+    for i in range(frame_count):
+        # Only detect tools when state is "using tool"
+        if frame_labels[i] == "using tool":
+            # Run detection every 15 frames or when state changes
+            if i % 15 == 0 or (i > 0 and frame_labels[i-1] != "using tool"):
+                frame = get_frame(i + 1)
+                objects = get_objects(frame)
+                tool = None
+                for o in objects:
+                    if o[0] not in ["safety vest", "person", "hardhat", "hand"]:
+                        tool = o[0]
+                        break
+                if tool:
+                    # Propagate tool to next 15 frames or until state changes
+                    for j in range(i, min(i + 15, frame_count)):
+                        if frame_labels[j] == "using tool":
+                            frame_tools[j] = tool
+                        else:
+                            break
+
     # ----------------------------
     # Save labeled video
     # ----------------------------
@@ -300,10 +327,8 @@ def process_video(video_name):
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out_path = video_output_directory + video_name + ".mp4"
     out = cv2.VideoWriter(out_path, fourcc, fps, (width, height))
-    
-    model = get_local_model()
+
     latest_boxes = None
-    tool = None
 
     for i in range(frame_count):
         ret, frame = cap_playback.read()
@@ -315,13 +340,6 @@ def process_video(video_name):
             results = model(frame, conf=confidence_threshold)[0]
             latest_boxes = results
 
-            objects = get_objects(frame)
-            tool = None
-            for o in objects:
-                if o[0] not in ["safety vest", "person", "hardhat", "hand"]:
-                    tool = o[0]
-                    break
-
         # Draw boxes from latest detection
         frame_with_boxes = frame.copy()
         if latest_boxes is not None:
@@ -332,8 +350,8 @@ def process_video(video_name):
         if label:
             if label.lower() == "using tool":
                 label = "using an unknown tool"
-                if tool:
-                    label = f"using {tool}"
+                if frame_tools[i]:
+                    label = f"using {frame_tools[i]}"
             frame_with_boxes = overlay_action(frame_with_boxes, label)
 
         out.write(frame_with_boxes)
@@ -341,8 +359,8 @@ def process_video(video_name):
     cap_playback.release()
     out.release()
     print(f"Saved labeled video to {out_path}")
-    
-    # Save CSV with state changes
+
+    # Save CSV with state changes (frame, label, tool)
     csv_path = csv_directory + video_name + ".csv"
     total_duration = frame_count / fps
     with open(csv_path, 'w') as f:
@@ -350,12 +368,14 @@ def process_video(video_name):
 
         if frame_count > 0:
             current_label = frame_labels[0]
-            f.write(f"1,{current_label}\n")
+            current_tool = frame_tools[0]
+            f.write(f"1,{current_label},{current_tool}\n")
 
             for i in range(1, frame_count):
-                if frame_labels[i] != current_label:
+                if frame_labels[i] != current_label or frame_tools[i] != current_tool:
                     current_label = frame_labels[i]
-                    f.write(f"{i + 1},{current_label}\n")
+                    current_tool = frame_tools[i]
+                    f.write(f"{i + 1},{current_label},{current_tool}\n")
 
     print(f"Saved labels to {csv_path}")
 

@@ -1,0 +1,6 @@
+metric,value
+average_state_accuracy,0.6712709926692075
+average_object_accuracy,0.09970049330514447
+videos_with_tool_overlap,8.0
+total_videos,8.0
+total_duration,578.0763166666667

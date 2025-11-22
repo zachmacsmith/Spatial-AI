@@ -4,8 +4,6 @@ uses data from action classification and object detection and interaction classi
 feeds it all to LLM to analyse
 """
 
-
-
 import os
 import base64
 from anthropic import Anthropic

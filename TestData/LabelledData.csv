@@ -1,5 +1,5 @@
 Video ID,Timestamp,State,Object
-1,0:00,using tool,Measure
+1,0:00,using tool,Measuring Tape
 1,0:02,using tool,Pencil
 1,0:03,moving,
 1,0:08,using tool,Saw
@@ -24,16 +24,16 @@ Video ID,Timestamp,State,Object
 5,0:14,idle,
 5,0:15,using tool,Caulk gun
 5,0:18,moving,
-11,0:00,using tool,Measure
-16,0:00,using tool,Measure
+11,0:00,using tool,Measuring Tape
+16,0:00,using tool,Measuring Tape
 16,0:01,using tool,Pencil
 16,0:05,moving,
 16,0:07,idle,
 16,0:11,moving,
 16,0:13,using tool,Caulk gun
-17,0:00,using tool,Measure
+17,0:00,using tool,Measuring Tape
 17,0:03,using tool,Unknown
-17,0:05,using tool,Measure
+17,0:05,using tool,Measuring Tape
 17,0:07,using tool,Pencil
 18,0:00,using tool,Brick trowel
 18,0:01,moving,
@@ -47,12 +47,84 @@ Video ID,Timestamp,State,Object
 18,0:11,using tool,Brick
 18,0:13,using tool,Brick trowel
 21,0:00,idle,
-21,0:01,using tool,Measure
+21,0:01,using tool,Measuring Tape
 21,0:03,using tool,Pencil
 21,0:04,using tool,Unknown (wooden bar)
 21,0:06,using tool,Saw
 21,0:08,using tool,Unknown (wooden bar)
 21,0:10,idle,
 22,0:00,idle,
-22,0:04,using tool,Measure
+22,0:04,using tool,Measuring Tape
 22,0:13,using tool,Unknown
+30,0:00,using tool,Unknown
+30,0:04,moving,
+30,0:07,using tool,Unknown
+30,0:11,idle,
+30,0:13,using tool,saw
+30,0:33,idle,
+30,0:47,using tool,Unknown
+30,0:58,using tool,Unknown
+30,1:22,idle,
+30,1:26,using tool,Unknown
+30,1:29,idle,
+30,1:33,using tool,Unknown
+30,1:35,moving,
+30,1:38,using tool,Unknown
+30,1:42,idle,
+30,1:44,using tool,Unknown
+30,1:46,idle,
+30,1:47,using tool,Unknown
+30,1:57,idle,
+30,2:01,using tool,
+30,2:04,using tool,
+30,2:06,idle,
+30,2:13,using tool,
+30,2:15,idle,
+30,2:19,using tool,
+30,2:20,idle,
+30,2:25,using tool,
+30,2:30,idle,
+30,2:38,moving,
+30,2:41,using tool,
+30,2:42,using tool,
+30,2:44,using tool,Measuring Tape
+30,2:46,idle,
+30,2:56,using tool,Unknown
+30,3:04,idle,
+30,3:06,using tool,Unknown
+30,3:14,idle,
+30,3:16,using tool,Unknown
+30,3:23,moving,
+30,3:26,idle,
+30,3:57,using tool,
+30,3:59,idle,
+30,4:00,moving,
+30,4:06,using tool,Unknown
+30,4:12,moving,
+30,4:18,idle,
+30,4:28,using tool,
+30,4:33,idle,
+30,4:37,using tool,
+30,4:52,idle,
+30,4:54,using tool,
+30,4:59,idle,
+30,5:02,using tool,
+30,5:10,idle,
+30,5:11,moving,
+30,5:18,idle,
+30,5:22,using tool,
+30,5:36,idle,
+30,5:38,using tool,
+30,5:56,idle,
+30,6:02,idle,
+30,6:34,using tool,Measuring Tape
+30,6:45,using tool,Pencil
+30,6:47,idle,
+30,6:52,using tool,Pencil
+30,6:54,idle,
+30,6:57,using tool,Measuring Tape
+30,7:11,idle,
+30,7:13,using tool,Pencil
+30,7:17,using tool,Unknown
+30,7:21,using tool,Measuring Tape
+30,7:27,using tool,Pencil
