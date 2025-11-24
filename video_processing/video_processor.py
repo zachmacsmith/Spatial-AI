@@ -412,10 +412,11 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
     if batch_params.generate_labeled_video:
         print("\nGenerating labeled video...")
         
-        video_output_path = os.path.join(
-            batch_params.video_output_directory,
-            f"{video_name}.mp4"
-        )
+        # Organize videos by batch ID to prevent overwrites
+        batch_folder = Path(batch_params.video_output_directory) / batch_params.batch_id
+        batch_folder.mkdir(parents=True, exist_ok=True)
+        video_output_path = batch_folder / f"{video_name}.mp4"
+        video_output_path = str(video_output_path)
         
         writer = create_video_writer(
             video_output_path,
