@@ -483,9 +483,9 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
                 batch_params=batch_params
             )
             
-            out.write(annotated_frame)
+            writer.write(frame_with_viz)
         
-        out.release()
+        writer.release()
         print(f"Saved labeled video: {video_output_path}")
         output_files['video'] = video_output_path
         
