@@ -2,8 +2,17 @@ import os
 import time
 import csv
 from datetime import datetime
-from TestingClass import process_video
 from KeyFrameClassifier import process_video as generate_keyframes
+
+# Import new modular architecture
+from video_processing import (
+    BatchParameters,
+    PRESET_BASIC,
+    PRESET_OBJECTS,
+    PRESET_RELATIONSHIPS,
+    PRESET_FULL
+)
+from video_processing.video_processor import process_video
 
 # Default videos to process (used if user doesn't examine folder)
 videos_to_process = [
@@ -12,17 +21,58 @@ videos_to_process = [
     "video_05"
 ]
 
-# Ask which processing mode to use
-use_objects = input("Use object identification? (Y/N): ").strip().upper()
+# Ask which preset to use
+print("\n" + "="*60)
+print("SELECT PROCESSING PRESET")
+print("="*60)
+print("1. BASIC - Action classification only (TestingClass.py)")
+print("2. OBJECTS - With object detection (TestingClass2.py)")
+print("3. RELATIONSHIPS - With relationship tracking (TestingClass3.py)")
+print("4. FULL - Complete analysis with charts (TestingClassFINAL.py)")
+print("5. CUSTOM - Create custom configuration")
+print("="*60)
 
-if use_objects == 'Y':
-    from TestingClass2 import process_video
-    processing_mode = "with object identification"
+preset_choice = input("Select preset (1-5): ").strip()
+
+if preset_choice == '1':
+    batch_params = PRESET_BASIC.copy()
+    processing_mode = "BASIC (action classification only)"
+elif preset_choice == '2':
+    batch_params = PRESET_OBJECTS.copy()
+    processing_mode = "OBJECTS (with object detection)"
+elif preset_choice == '3':
+    batch_params = PRESET_RELATIONSHIPS.copy()
+    processing_mode = "RELATIONSHIPS (with relationship tracking)"
+elif preset_choice == '4':
+    batch_params = PRESET_FULL.copy()
+    processing_mode = "FULL (complete analysis)"
+elif preset_choice == '5':
+    # Custom configuration
+    batch_params = PRESET_FULL.copy()
+    processing_mode = "CUSTOM"
+    
+    # Allow customization
+    print("\nCustomize configuration (press Enter to keep default):")
+    
+    llm = input(f"LLM provider (claude/gemini/openai) [{batch_params.llm_provider.value}]: ").strip()
+    if llm:
+        from video_processing import LLMProvider
+        batch_params.llm_provider = LLMProvider(llm)
+    
+    cv_conf = input(f"CV confidence threshold [{batch_params.cv_confidence_threshold}]: ").strip()
+    if cv_conf:
+        batch_params.cv_confidence_threshold = float(cv_conf)
+    
+    workers = input(f"Max workers for keyframes [{batch_params.max_workers_keyframes}]: ").strip()
+    if workers:
+        batch_params.max_workers_keyframes = int(workers)
 else:
-    from TestingClass import process_video
-    processing_mode = "without object identification"
+    print("Invalid choice, using FULL preset")
+    batch_params = PRESET_FULL.copy()
+    processing_mode = "FULL (complete analysis)"
 
-print(f"\nRunning {processing_mode}")
+print(f"\nUsing preset: {processing_mode}")
+print(f"Batch ID: {batch_params.batch_id}")
 
 # Ask if user wants to examine videos folder
 examine = input("Examine videos folder to select files? (Y/N): ").strip().upper()
@@ -127,7 +177,7 @@ timing_file_handle = open(timing_file, 'a', newline='')
 timing_writer = csv.writer(timing_file_handle)
 
 if not file_exists:
-    timing_writer.writerow(['batch', 'timestamp', 'video_name', 'video_duration_sec', 'processing_time_sec', 'processing_time_min', 'speed_ratio', 'batch_note'])
+    timing_writer.writerow(['batch', 'timestamp', 'video_name', 'video_duration_sec', 'processing_time_sec', 'processing_time_min', 'speed_ratio', 'batch_note', 'batch_id'])
 
 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 timing_results = {}
@@ -147,7 +197,9 @@ for i, video_name in enumerate(videos_to_process, 1):
              print(f"Generating keyframes for {video_name}...")
              generate_keyframes(video_name)
 
-        csv_path = process_video(video_name)
+        # Process video with new architecture
+        output_files = process_video(video_name, batch_params)
+        csv_path = output_files['actions_csv']
         
         end_time = time.time()
         processing_time = end_time - start_time
@@ -164,7 +216,7 @@ for i, video_name in enumerate(videos_to_process, 1):
             'speed_ratio': speed_ratio
         }
         
-        # Write to timing CSV immediately
+        # Write to timing CSV immediately (with batch_id)
         timing_writer.writerow([
             batch_number,
             timestamp,
@@ -173,7 +225,8 @@ for i, video_name in enumerate(videos_to_process, 1):
             processing_time,
             processing_time/60,
             speed_ratio,
-            batch_note
+            batch_note,
+            batch_params.batch_id  # Add batch_id
         ])
         timing_file_handle.flush()  # Ensure it's written immediately
         
@@ -221,25 +274,19 @@ if run_benchmark_flag == 'Y':
     print("Starting Benchmark")
     print("="*50)
     
-    from Benchmark import run_benchmark
+    from post_processing.accuracy_benchmark import run_benchmark
     
-    # Determine which model data directory to use
-    if use_objects == 'Y':
-        model_data_dir = "Outputs/Data2/"
-    else:
-        model_data_dir = "Outputs/Data/"
+    # Use outputs/data/ directory (new architecture always uses this)
+    model_data_dir = batch_params.csv_directory
     
     # Get benchmark metadata
     benchmark_batch_name = input("\nBenchmark batch name: ").strip()
     if not benchmark_batch_name:
         benchmark_batch_name = f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     
-    model_version = input("Model version (e.g., TestingClass2_v1): ").strip()
+    model_version = input("Model version (e.g., PRESET_FULL): ").strip()
     if not model_version:
-        if use_objects == 'Y':
-            model_version = "TestingClass2"
-        else:
-            model_version = "TestingClass"
+        model_version = batch_params.config_name
     
     benchmark_notes = input("Benchmark notes (optional): ").strip()
     
@@ -250,7 +297,8 @@ if run_benchmark_flag == 'Y':
             batch_name=benchmark_batch_name,
             model_version=model_version,
             notes=benchmark_notes,
-            model_data_dir=model_data_dir
+            model_data_dir=model_data_dir,
+            batch_id=batch_params.batch_id  # Pass batch_id
         )
         
         if results:
