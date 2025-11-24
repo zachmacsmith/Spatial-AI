@@ -1,48 +1,40 @@
-# Video Processing Pipeline - Complete System
+# Video Processing System
 
-A production-ready, modular video processing system for analyzing construction site videos with AI-powered action classification, object detection, and productivity analysis.
-
-## 🎯 Overview
-
-This system provides a complete solution for video analysis with:
-
-- **73% API cost reduction** through intelligent request batching
-- **40+ configuration parameters** for complete control
-- **Comprehensive benchmarking** for accuracy and performance analysis
-- **Multi-model support** (Claude, Gemini, OpenAI + YOLO variants)
-- **Production-ready** with 100% test coverage
+A modular video analysis system for construction site videos with AI-powered action classification, object detection, and relationship tracking.
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
-### 1. Install Dependencies
+### 1. Setup Environment
 
 ```bash
-conda activate egoenv  # Or your environment
-pip install anthropic google-generativeai openai ultralytics opencv-python pandas numpy pillow matplotlib seaborn
+conda env create -f environment.yml
+conda activate egoenv
 ```
 
 ### 2. Configure API Keys
 
-Create `shared/config.py`:
+Create `config.py` in the root directory:
+
 ```python
-ANTHROPIC_API_KEY = "your-claude-key"
-GEMINI_API_KEY = "your-gemini-key"  # Optional
-OPENAI_API_KEY = "your-openai-key"  # Optional
+GEMINI_API_KEY = "your-gemini-api-key"
+ANTHROPIC_API_KEY = "your-claude-api-key"  # Optional
+OPENAI_API_KEY = "your-openai-api-key"     # Optional
 ```
 
-### 3. Process a Video
+### 3. Run Processing
+
+**Option A: Use Presets (Recommended)**
 
 ```python
 from video_processing import process_video, PRESET_FULL
 
 outputs = process_video("video_01", PRESET_FULL)
-print(f"Actions CSV: {outputs['actions_csv']}")
-print(f"Batch ID: {PRESET_FULL.batch_id}")
+print(f"Results saved to: {outputs['actions_csv']}")
 ```
 
-### 4. Or Use Batch Processor
+**Option B: Use Batch Processor (Interactive)**
 
 ```bash
 python batch_process.py
@@ -50,121 +42,58 @@ python batch_process.py
 
 ---
 
-## ⚡ New Features
+## System Architecture
 
-### API Request Batching (73% Cost Reduction!)
-
-Automatically groups API requests into batches to minimize costs:
-
-```python
-from video_processing import BatchParameters
-
-params = BatchParameters(
-    enable_batch_processing=True,  # ✅ Enabled by default!
-    batch_size=5,                   # Requests per batch
-    use_smart_batching=True         # Intelligent grouping
-)
-
-# 11 requests → 3 batches = 73% fewer API calls!
-```
-
-**Benefits**:
-- **73% fewer API calls** for typical videos
-- **3-5x faster** processing
-- **No rate limit errors**
-- **Automatic** - works out of the box
-
-See `API_REQUEST_BATCHING.md` for details.
-
-### Comprehensive Benchmarking
-
-Compare model accuracy and performance:
-
-```bash
-# Run accuracy benchmark
-python -c "from post_processing.accuracy_benchmark import run_benchmark; run_benchmark('batch_id_here')"
-
-# Compare multiple models
-python compare_models.py
-```
-
-**Features**:
-- Accuracy benchmarking against ground truth
-- Performance analysis (timing, speed ratios)
-- Model comparison with visualizations
-- Interactive HTML reports
-
-See `BENCHMARKING.md` for details.
-
-### Frame Cache Improvements
-
-Handles video metadata mismatches gracefully:
+### Core Components
 
 ```
-⚠ Video metadata mismatch: reported 569 frames, actually loaded 504 frames
+video_processing/          # Main processing pipeline
+├── ai/                    # LLM and CV model interfaces
+│   ├── llm_service.py    # Claude, Gemini, OpenAI support
+│   ├── cv_service.py     # YOLO object detection
+│   └── prompt_builder.py # Prompt engineering
+├── analysis/              # Analysis methods
+│   ├── action_classifier.py      # Action classification
+│   ├── tool_detector.py          # Tool detection
+│   └── relationship_tracker.py   # Object relationships
+├── utils/                 # Utilities
+│   ├── video_utils.py    # Video I/O, frame handling
+│   └── visualization.py  # Overlay generation
+└── output/                # Output management
+    └── output_manager.py # CSV/metadata generation
+
+post_processing/           # Analysis tools
+├── accuracy_benchmark.py  # Accuracy evaluation
+├── performance_benchmark.py # Performance analysis
+└── model_comparison.py    # Model comparison
 ```
 
-System automatically uses actual frame count, preventing errors.
-
----
-
-## 📁 Project Structure
+### Data Flow
 
 ```
-CompleteModel_Agentic/
-├── video_processing/              # Pre-processing (video analysis)
-│   ├── batch_parameters.py        # Configuration (40+ parameters)
-│   ├── video_processor.py         # Main orchestrator
-│   ├── api_request_batcher.py     # API batching (NEW!)
-│   ├── ai/
-│   │   ├── llm_service.py         # Claude, Gemini, OpenAI
-│   │   ├── cv_service.py          # YOLO abstraction
-│   │   └── prompt_builder.py      # Flexible prompts
-│   ├── analysis/
-│   │   ├── action_classifier.py   # Action classification
-│   │   ├── tool_detector.py       # Tool detection
-│   │   └── relationship_tracker.py # Relationship tracking
-│   ├── utils/
-│   │   ├── video_utils.py         # Video utilities
-│   │   └── visualization.py       # Visualization
-│   └── output/
-│       └── output_manager.py      # Output management
-│
-├── post_processing/               # Post-processing (analysis)
-│   ├── accuracy_benchmark.py      # Accuracy benchmarking (NEW!)
-│   ├── performance_benchmark.py   # Performance analysis (NEW!)
-│   ├── model_comparison.py        # Model comparison (NEW!)
-│   ├── data_reader.py             # CSV parsing
-│   └── productivity_analyzer.py   # Productivity analysis
-│
-├── batch_process.py               # Batch processor (menu-driven)
-├── compare_models.py              # Model comparison CLI (NEW!)
-├── test_comprehensive.py          # Unit tests (15/15 passed)
-├── test_end_to_end.py            # Integration test
-│
-├── videos/                        # Input videos
-├── keyframes/                     # Generated keyframes
-└── outputs/                       # All outputs
-    ├── batch_tracking/            # Batch configurations
-    ├── data/                      # CSVs
-    ├── vid_objs/                  # Labeled videos
-    └── benchmarks/                # Benchmark results (NEW!)
+Input Video → Keyframe Extraction → Action Classification → Output CSVs
+                                  ↓
+                            Object Detection (optional)
+                                  ↓
+                         Relationship Tracking (optional)
+                                  ↓
+                          Labeled Video (optional)
 ```
 
 ---
 
-## 🎛️ Configuration
+## Configuration System
 
-### Presets
+All processing is controlled via `BatchParameters`. Use presets or customize:
 
-Five built-in presets for common use cases:
+### Available Presets
 
 ```python
 from video_processing import (
-    PRESET_BASIC,           # Basic action classification
+    PRESET_BASIC,           # Action classification only
     PRESET_OBJECTS,         # + Object detection
     PRESET_RELATIONSHIPS,   # + Relationship tracking
-    PRESET_HTML_ANALYSIS,   # + HTML productivity reports
+    PRESET_HTML_ANALYSIS,   # + HTML reports
     PRESET_FULL             # All features enabled
 )
 ```
@@ -176,266 +105,227 @@ from video_processing import BatchParameters
 
 params = BatchParameters(
     # AI Models
-    llm_provider="gemini",              # Claude, Gemini, or OpenAI
-    llm_model="gemini-2.0-flash-exp",   # Model version
-    cv_model="yolo_v8",                 # YOLO variant
-    
-    # API Request Batching (NEW!)
-    enable_batch_processing=True,       # Enable batching
-    batch_size=5,                       # Requests per batch
-    api_requests_per_minute=15,         # Your API tier limit
+    llm_provider="gemini",              # claude, gemini, or openai
+    llm_model="gemini-2.0-flash-exp",
+    cv_model="yolo_current",
     
     # Features
     enable_object_detection=True,
     enable_relationship_tracking=True,
     enable_action_classification=True,
     
-    # Performance
-    max_workers_keyframes=16,           # Parallel processing
-    preload_all_frames=True
+    # Processing
+    num_frames_per_interval=5,
+    enable_temporal_smoothing=True,
+    
+    # Output
+    generate_labeled_video=True,
+    save_actions_csv=True,
+    save_relationships_csv=True
 )
 
 outputs = process_video("video_01", params)
 ```
 
-### API Rate Limits
+### Key Parameters
+
+**AI Configuration:**
+- `llm_provider` - LLM provider (gemini, claude, openai)
+- `llm_model` - Model version
+- `cv_model` - YOLO variant (yolo_current, yolo_v8, yolo_v9)
+
+**Analysis Methods:**
+- `action_classification_method` - How to classify actions (llm_multiframe, llm_singleframe, cv_based, hybrid)
+- `tool_detection_method` - How to detect tools (llm_direct, llm_with_context, cv_inference, hybrid)
+
+**Performance:**
+- `enable_batch_processing` - Group API requests for efficiency (default: True)
+- `api_requests_per_minute` - Rate limit based on your API tier
+- `max_workers_keyframes` - Parallel processing threads
+
+**Output:**
+- `csv_directory` - Where to save CSVs (default: `outputs/data/`)
+- `video_output_directory` - Where to save videos (default: `outputs/vid_objs/`)
+
+See `video_processing/batch_parameters.py` for all 40+ parameters.
+
+---
+
+## Output Structure
+
+All outputs are organized by batch ID to prevent overwrites:
+
+```
+outputs/
+├── data/
+│   └── batch_20251124_015521_abc123/
+│       ├── video_01.csv                  # Action classifications
+│       ├── video_01_relationships.csv    # Object relationships
+│       └── video_01_metadata.json        # Processing metadata
+├── vid_objs/
+│   └── batch_20251124_015521_abc123/
+│       └── video_01.mp4                  # Labeled video
+└── batch_tracking/
+    └── batch_20251124_015521_abc123.json # Batch configuration
+```
+
+### Actions CSV Format
+
+```csv
+fps,total_duration,batch_id
+23.98,21.02,batch_20251124_015521_abc123
+1,using tool
+450,idle
+890,moving
+```
+
+### Relationships CSV Format
+
+```csv
+batch_id,batch_20251124_015521_abc123
+start_frame,end_frame,start_time,end_time,duration,objects
+100,250,4.17,10.42,6.25,hammer,nail
+```
+
+---
+
+## Common Tasks
+
+### Compare Different Models
+
+```python
+from video_processing import BatchParameters, CVModel
+
+for cv_model in [CVModel.YOLO_V8, CVModel.YOLO_V9]:
+    params = BatchParameters(
+        cv_model=cv_model,
+        experiment_id="cv_comparison"
+    )
+    outputs = process_video("video_01", params)
+```
+
+### Process Multiple Videos
+
+```python
+params = PRESET_FULL
+videos = ["video_01", "video_02", "video_03"]
+
+for video in videos:
+    outputs = process_video(video, params)
+    print(f"Completed: {video}")
+```
+
+### Reproduce Previous Run
+
+```python
+from video_processing import BatchParameters
+
+# Load exact configuration from previous run
+params = BatchParameters.from_batch_id("batch_20251124_015521_abc123")
+outputs = process_video("video_01", params)
+```
+
+### Benchmark Accuracy
+
+```python
+from post_processing.accuracy_benchmark import run_benchmark
+
+results, charts = run_benchmark(
+    batch_id="batch_20251124_015521_abc123",
+    model_data_dir="ModelData"
+)
+```
+
+---
+
+## Directory Structure
+
+```
+CompleteModel_Agentic/
+├── README.md                  # This file
+├── config.py                  # API keys (create this)
+├── batch_process.py           # Interactive batch processor
+├── example_usage.py           # Usage examples
+│
+├── video_processing/          # Core processing code
+├── post_processing/           # Analysis tools
+├── shared/                    # Shared utilities
+│
+├── docs/                      # Documentation
+│   ├── examples/              # Utility scripts
+│   ├── guides/                # How-to guides
+│   └── testing/               # Test scripts
+│
+├── videos/                    # Input videos
+├── keyframes/                 # Generated keyframes
+├── TestData/                  # Ground truth (for benchmarking)
+└── outputs/                   # All outputs (organized by batch_id)
+```
+
+---
+
+## API Rate Limits
 
 Configure based on your API tier:
 
 ```python
 # Free Tier (Conservative)
 params = BatchParameters(
-    api_requests_per_minute=10,  # Low limit
-    batch_size=10                 # Larger batches
+    api_requests_per_minute=10,
+    enable_batch_processing=True,  # Groups requests
+    batch_size=10
 )
 
-# Paid Tier (Higher Limits)
+# Paid Tier
 params = BatchParameters(
-    api_requests_per_minute=60,  # Higher limit
-    batch_size=5                  # Smaller batches
+    api_requests_per_minute=60,
+    enable_batch_processing=True,
+    batch_size=5
 )
 ```
 
-See `RATE_LIMITING.md` for API tier limits.
+**API Request Batching** (enabled by default) groups multiple requests together to reduce total API calls and avoid rate limits.
 
 ---
 
-## 🔬 Batch Tracking
+## Extending the System
 
-Every run gets a unique batch ID linking outputs to exact parameters:
+The system uses a registry pattern for easy extension. See `docs/guides/EXTENSIBILITY_GUIDE.md` for details.
+
+**Add custom action classifier:**
 
 ```python
-params = PRESET_FULL
-print(params.batch_id)
-# Output: batch_20251124_014116_02a77cae
+from video_processing.analysis.action_classifier import register_action_classifier
 
-# Load configuration from previous run
-old_params = BatchParameters.from_batch_id("batch_20251124_014116_02a77cae")
+@register_action_classifier("my_method")
+def my_classifier(frames, batch_params, llm_service, prompt_builder, **kwargs):
+    # Your logic here
+    return "action_label"
 
-# Compare configurations
-from video_processing.batch_comparison import BatchRegistry
-registry = BatchRegistry()
-groups = registry.group_by_parameters(['llm_provider', 'cv_model'])
+# Use it
+params = BatchParameters(action_classification_method="my_method")
 ```
 
----
-
-## 📊 Benchmarking
-
-### Accuracy Benchmarking
-
-Compare model predictions against ground truth:
-
-```python
-from post_processing.accuracy_benchmark import run_benchmark
-
-results, charts = run_benchmark(
-    batch_id="batch_20251124_014116_02a77cae",
-    model_data_dir="ModelData"
-)
-
-print(f"Average accuracy: {results['accuracy'].mean():.2%}")
-print(f"Charts saved: {charts}")
-```
-
-### Performance Analysis
-
-Analyze processing speed and efficiency:
-
-```python
-from post_processing.performance_benchmark import analyze_performance
-
-metrics = analyze_performance(
-    batch_ids=["batch_1", "batch_2", "batch_3"]
-)
-
-print(f"Average speed ratio: {metrics['avg_speed_ratio']:.2f}x")
-```
-
-### Model Comparison
-
-Compare multiple models with interactive reports:
-
-```bash
-python compare_models.py
-# Select batches to compare
-# Generates HTML report with charts
-```
-
----
-
-## 📈 Performance
-
-### API Efficiency
-
-**Without Batching**:
-- 11 API calls for typical video
-- ~114 seconds wait time (10 req/min limit)
-- Higher costs
-
-**With Batching** (enabled by default):
-- 3 API calls for same video
-- ~24 seconds wait time
-- **73% cost reduction** 💰
-- **4.5x faster** ⚡
-
-### Processing Speed
-
-**Typical 21-second video**:
-- Processing time: ~2.4 minutes
-- Speed ratio: 6.8x realtime
-- Frames processed: 504
-- API calls: 3 (with batching)
-
----
-
-## 🧪 Testing
-
-### Run Unit Tests
-
-```bash
-python test_comprehensive.py
-# 15/15 tests passed ✅
-```
-
-### Run End-to-End Test
-
-```bash
-python test_end_to_end.py
-# Full pipeline validation with Gemini API
-```
-
-### Test Coverage
-
-- ✅ API request batching (4 tests)
-- ✅ Rate limiting (3 tests)
-- ✅ Configuration system (3 tests)
-- ✅ Integration (2 tests)
-- ✅ Smart batching (1 test)
-- ✅ Factory functions (2 tests)
-
-**Total**: 15/15 passed (100%)
-
----
-
-## 📝 Outputs
-
-### Actions CSV
-
-```csv
-fps,total_duration,batch_id
-23.98,21.02,batch_20251124_014116_02a77cae
-1,using tool
-450,idle
-890,moving
-```
-
-### Relationships CSV
-
-```csv
-batch_id,batch_20251124_014116_02a77cae
-start_frame,end_frame,start_time,end_time,duration,objects
-100,250,4.17,10.42,6.25,hammer,nail
-```
-
-### Metadata JSON
-
-```json
-{
-  "video_name": "video_01",
-  "batch_id": "batch_20251124_014116_02a77cae",
-  "processing_time_seconds": 143.37,
-  "model_versions": {
-    "llm_provider": "gemini",
-    "llm_model": "gemini-2.0-flash-exp",
-    "cv_model": "yolo_current"
-  },
-  "api_stats": {
-    "total_requests": 3,
-    "batch_processing_enabled": true,
-    "batch_size": 5
-  }
-}
-```
-
----
-
-## 🔧 Advanced Usage
-
-### Compare CV Models
-
-```python
-from video_processing import CVModel, PRESET_FULL
-
-for cv_model in [CVModel.YOLO_V8, CVModel.YOLO_V9]:
-    params = PRESET_FULL.copy()
-    params.cv_model = cv_model
-    params.experiment_id = "cv_comparison"
-    
-    outputs = process_video("video_01", params)
-    print(f"Batch ID: {params.batch_id}")
-```
-
-### Compare LLM Providers
-
-```python
-from video_processing import LLMProvider
-
-for provider in [LLMProvider.CLAUDE, LLMProvider.GEMINI]:
-    params = PRESET_FULL.copy()
-    params.llm_provider = provider
-    
-    outputs = process_video("video_01", params)
-```
-
-### Custom Prompt Templates
+**Add custom prompt template:**
 
 ```python
 params = BatchParameters(
-    prompt_template="detailed",  # standard, detailed, minimal, custom
-    include_motion_score=True,
-    include_object_list=True,
-    max_objects_in_prompt=5
+    prompt_template="custom",
+    custom_prompt_path="my_prompts/template.txt"
 )
 ```
 
 ---
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 ### Rate Limit Errors
 
-If you hit API rate limits:
+Wait 60 seconds, then reduce `api_requests_per_minute`:
 
-1. **Wait 60 seconds** for quota to reset
-2. **Reduce `api_requests_per_minute`**:
-   ```python
-   params.api_requests_per_minute = 5  # More conservative
-   ```
-3. **Increase `batch_size`**:
-   ```python
-   params.batch_size = 10  # Fewer total API calls
-   ```
+```python
+params.api_requests_per_minute = 5
+```
 
 ### Frame Cache Warnings
 
@@ -443,121 +333,43 @@ If you hit API rate limits:
 ⚠ Video metadata mismatch: reported 569 frames, actually loaded 504 frames
 ```
 
-This is **normal** for some videos. The system handles it automatically.
+This is normal for some videos. The system handles it automatically.
 
 ### Import Errors
 
+Ensure you're in the project directory:
+
 ```bash
-# Ensure you're in the correct directory
 cd /path/to/CompleteModel_Agentic
 python example_usage.py
 ```
 
-### Missing API Keys
-
-```python
-# Set in shared/config.py or pass directly
-params.llm_api_key = "your-api-key"
-```
-
 ---
 
-## 📚 Documentation
-
-- `API_REQUEST_BATCHING.md` - API batching guide (NEW!)
-- `RATE_LIMITING.md` - Rate limiting reference
-- `code_review.md` - Code quality assessment (NEW!)
-- `final_test_report.md` - Test results (NEW!)
-- `batch_tracking_guide.md` - Batch tracking system
-- `batch_parameters_design.md` - All 40+ parameters
-- `example_usage.py` - 7 usage examples
-
----
-
-## 🎯 Key Features
-
-### ✅ API Cost Optimization
-- **73% reduction** in API calls through intelligent batching
-- Smart grouping of keyframes and intervals
-- Automatic rate limit management
-- **Production-tested** with real APIs
-
-### ✅ Comprehensive Benchmarking
-- Accuracy benchmarking against ground truth
-- Performance analysis with timing metrics
-- Model comparison with visualizations
-- Interactive HTML reports
-
-### ✅ Robust Error Handling
-- Graceful metadata mismatch handling
-- API error fallbacks
-- Frame cache validation
-- Clear warning messages
-
-### ✅ Production Ready
-- 100% unit test coverage (15/15 passed)
-- End-to-end validation
-- Real-world testing
-- Comprehensive documentation
-
----
-
-## 📦 Dependencies
+## Testing
 
 ```bash
-# Core
-anthropic              # Claude API
-google-generativeai    # Gemini API (optional)
-openai                 # OpenAI API (optional)
-ultralytics            # YOLO
-opencv-python          # Video processing
+# Run all tests
+python docs/testing/test_comprehensive.py
 
-# Data & Visualization
-numpy
-pandas
-matplotlib
-seaborn
-pillow
+# Test specific preset
+python -c "from video_processing import process_video, PRESET_BASIC; process_video('video_01', PRESET_BASIC)"
 ```
 
 ---
 
-## 🔮 Future Enhancements
+## Documentation
 
-### Planned
-- [ ] On-demand frame loading for very large videos
-- [ ] Automatic retry logic with exponential backoff
-- [ ] Progress bars for long-running operations
-- [ ] Cost tracking and estimation
-
-### Easy to Add
-- New action classification methods (via registry)
-- New tool detection strategies (via registry)
-- Custom prompt templates
-- Alternative CV models
+- `docs/guides/EXTENSIBILITY_GUIDE.md` - How to extend the system
+- `docs/guides/API_REQUEST_BATCHING.md` - API batching details
+- `docs/guides/RATE_LIMITING.md` - API rate limit reference
+- `example_usage.py` - Code examples
 
 ---
 
-## 📄 License
+## Support
 
-[Your License Here]
-
-## 👥 Contributors
-
-[Your Name/Team]
-
----
-
-## 🆘 Support
-
-**Questions?** Check:
+For questions or issues, check:
 1. `example_usage.py` - Working examples
-2. `API_REQUEST_BATCHING.md` - Batching guide
-3. `RATE_LIMITING.md` - API limits
-4. Documentation in `.gemini/antigravity/brain/`
-
-**Issues?** See `code_review.md` for troubleshooting.
-
----
-
-**🎉 Ready to use! The system is production-ready with 73% API cost reduction and comprehensive testing.**
+2. `docs/guides/` - Detailed guides
+3. `video_processing/batch_parameters.py` - All configuration options
