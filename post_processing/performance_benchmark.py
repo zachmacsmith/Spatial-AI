@@ -17,7 +17,7 @@ import seaborn as sns
 from typing import List, Dict, Any
 
 
-def analyze_timing_data(timing_csv_path: str = "Outputs/timing_results.csv") -> pd.DataFrame:
+def analyze_timing_data(timing_csv_path: str = "outputs/timing_results.csv") -> pd.DataFrame:
     """
     Load and analyze timing data from batch_process.py
     
@@ -71,7 +71,7 @@ def analyze_timing_data(timing_csv_path: str = "Outputs/timing_results.csv") -> 
     return df
 
 
-def compare_batch_performance(batch_ids: List[str], timing_csv_path: str = "Outputs/timing_results.csv") -> Dict[str, Any]:
+def compare_batch_performance(batch_ids: List[str], timing_csv_path: str = "outputs/timing_results.csv") -> Dict[str, Any]:
     """
     Compare performance across multiple batches
     
@@ -268,7 +268,7 @@ def generate_performance_charts(timing_data: pd.DataFrame, output_dir: str) -> L
 
 
 def run_performance_analysis(batch_ids: List[str] = None, 
-                            timing_csv_path: str = "Outputs/timing_results.csv",
+                            timing_csv_path: str = "outputs/timing_results.csv",
                             output_dir: str = "benchmark_results/performance") -> Dict[str, Any]:
     """
     Run complete performance analysis
@@ -348,9 +348,9 @@ if __name__ == "__main__":
     print("Performance Analysis Tool")
     print("="*60)
     
-    timing_path = input("Timing CSV path (default: Outputs/timing_results.csv): ").strip()
+    timing_path = input("Timing CSV path (default: outputs/timing_results.csv): ").strip()
     if not timing_path:
-        timing_path = "Outputs/timing_results.csv"
+        timing_path = "outputs/timing_results.csv"
     
     # Check if file exists
     if not os.path.exists(timing_path):

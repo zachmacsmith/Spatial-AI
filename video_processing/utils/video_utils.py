@@ -4,6 +4,7 @@ Video Utilities - Frame handling, motion detection, video properties
 Common utilities for video processing.
 """
 
+import os
 import cv2
 import numpy as np
 from typing import List, Dict, Tuple, Optional
@@ -54,14 +55,41 @@ def load_all_frames(video_path: str) -> Dict[int, np.ndarray]:
     
     Returns:
         Dict mapping frame_number (1-indexed) -> frame array
+        
+    Raises:
+        FileNotFoundError: If video file doesn't exist
+        RuntimeError: If video cannot be opened or no frames can be read
     """
+    # Check if file exists
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"Video file not found: {video_path}")
+    
     cap = cv2.VideoCapture(video_path)
+    
+    # Check if video opened successfully
+    if not cap.isOpened():
+        cap.release()
+        raise RuntimeError(f"OpenCV failed to open video: {video_path}. "
+                         f"File may be corrupted or use an unsupported codec.")
+    
     frame_cache = {}
     frame_number = 1
     
     # Get reported frame count (may be inaccurate)
     reported_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     
+    # Try to read first frame to verify video is readable
+    ret, first_frame = cap.read()
+    if not ret:
+        cap.release()
+        raise RuntimeError(f"Cannot read frames from video: {video_path}. "
+                         f"Video file may be corrupted or empty.")
+    
+    # Store first frame
+    frame_cache[1] = first_frame
+    frame_number = 2
+    
+    # Read remaining frames
     while True:
         ret, frame = cap.read()
         if not ret:
@@ -75,6 +103,9 @@ def load_all_frames(video_path: str) -> Dict[int, np.ndarray]:
     if actual_frames != reported_frames:
         print(f"  ⚠ Video metadata mismatch: reported {reported_frames} frames, "
               f"actually loaded {actual_frames} frames")
+    
+    if actual_frames == 0:
+        raise RuntimeError(f"No frames could be loaded from video: {video_path}")
     
     return frame_cache
 

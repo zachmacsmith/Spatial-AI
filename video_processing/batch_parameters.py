@@ -99,7 +99,7 @@ class BatchParameters:
     
     # LLM Configuration
     llm_provider: LLMProvider = LLMProvider.GEMINI  # Changed to Gemini (working API)
-    llm_model: str = "gemini-2.0-flash-exp"
+    llm_model: str = "gemini-2.0-flash-lite"
     llm_api_key: Optional[str] = None
     llm_max_tokens: int = 1000
     llm_temperature: float = 0.0
@@ -164,7 +164,7 @@ class BatchParameters:
     draw_bounding_boxes: bool = True
     draw_relationship_lines: bool = True
     draw_action_labels: bool = True
-    overlay_font_size: int = 36
+    overlay_font_size: int = 96
     save_actions_csv: bool = True
     save_relationships_csv: bool = True
     productivity_analysis_format: ProductivityAnalysisFormat = ProductivityAnalysisFormat.IMAGES
@@ -189,11 +189,11 @@ class BatchParameters:
     
     # API Rate Limiting
     enable_rate_limiting: bool = True  # Enable API rate limiting
-    api_requests_per_minute: int = 10  # Max API requests per minute (adjust based on your tier)
+    pricing_tier: str = "free"  # "free" or "pay_as_you_go"
+    api_requests_per_minute: Optional[int] = None  # None = auto-configure based on model/tier
     rate_limit_buffer: float = 0.1  # Safety buffer (10% slower than limit)
     
     # API Request Batching (NEW - Better than rate limiting!)
-    # Groups multiple API requests into batches to reduce total API calls
     enable_batch_processing: bool = True  # Enable API request batching
     batch_size: int = 5  # Number of API requests per batch
     use_smart_batching: bool = True  # Intelligently group similar requests
@@ -236,9 +236,13 @@ class BatchParameters:
     # ==========================================
     
     def __post_init__(self):
-        """Auto-populate metadata on creation"""
+        """Auto-populate metadata and configure rate limits"""
         import uuid
         from pathlib import Path
+        
+        # Auto-configure rate limits if not manually set
+        if self.api_requests_per_minute is None:
+            self._configure_rate_limit()
         
         if self.created_at is None:
             self.created_at = datetime.datetime.now().isoformat()
@@ -248,6 +252,27 @@ class BatchParameters:
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             unique_id = str(uuid.uuid4())[:8]
             self.batch_id = f"batch_{timestamp}_{unique_id}"
+            
+    def _configure_rate_limit(self):
+        """Load rate limits from config file based on model and tier"""
+        try:
+            config_path = Path(__file__).parent / 'config' / 'google_model_limits.json'
+            if config_path.exists():
+                with open(config_path, 'r') as f:
+                    limits = json.load(f)
+                
+                model_limits = limits.get(self.llm_model, limits.get("default"))
+                if model_limits:
+                    limit = model_limits.get(self.pricing_tier, 5)
+                    self.api_requests_per_minute = limit
+                    # print(f"✓ Auto-configured rate limit for {self.llm_model} ({self.pricing_tier}): {limit} RPM")
+                else:
+                    self.api_requests_per_minute = 10
+            else:
+                self.api_requests_per_minute = 10
+        except Exception as e:
+            print(f"⚠ Error loading rate limits: {e}")
+            self.api_requests_per_minute = 10
         
         # Create batch tracking directory
         Path(self.batch_tracking_directory).mkdir(parents=True, exist_ok=True)

@@ -1,0 +1,26 @@
+{
+    "gemini-1.5-flash": {
+        "free": 15,
+        "pay_as_you_go": 1000
+    },
+    "gemini-1.5-pro": {
+        "free": 2,
+        "pay_as_you_go": 360
+    },
+    "gemini-2.0-flash-exp": {
+        "free": 10,
+        "pay_as_you_go": 10
+    },
+    "gemini-2.5-flash": {
+        "free": 10,
+        "pay_as_you_go": 1000
+    },
+    "gemini-2.0-flash-lite": {
+        "free": 30,
+        "pay_as_you_go": 30
+    },
+    "default": {
+        "free": 5,
+        "pay_as_you_go": 60
+    }
+}

@@ -1,8 +1,17 @@
 import os
+import sys
 import time
 import csv
 from datetime import datetime
-from KeyFrameClassifier import process_video as generate_keyframes
+
+# Add current directory to path for KeyFrameClassifier import
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+try:
+    from KeyFrameClassifier import process_video as generate_keyframes
+except ImportError:
+    print("⚠ KeyFrameClassifier not found, keyframe generation will be skipped if needed")
+    generate_keyframes = None
 
 # Import new modular architecture
 from video_processing import (

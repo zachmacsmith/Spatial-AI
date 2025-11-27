@@ -92,7 +92,7 @@ def compare_models(batch_ids: List[str],
         # Load performance data if requested
         if include_performance:
             try:
-                timing_file = "Outputs/timing_results.csv"
+                timing_file = "outputs/timing_results.csv"
                 if os.path.exists(timing_file):
                     timing_df = pd.read_csv(timing_file)
                     batch_timing = timing_df[timing_df['batch'] == batch_id]

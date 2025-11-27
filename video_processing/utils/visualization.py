@@ -13,7 +13,7 @@ import colorsys
 
 # Try to load font, fall back to default if not available
 try:
-    FONT = ImageFont.truetype("arial.ttf", 36)
+    FONT = ImageFont.truetype("arial.ttf", 96)
 except:
     FONT = ImageFont.load_default()
 
@@ -47,8 +47,8 @@ def get_color_for_class(class_name: str, all_class_names: set) -> Tuple[int, int
 def overlay_action_label(
     frame: np.ndarray,
     label: str,
-    font_size: int = 36,
-    position: Tuple[int, int] = (30, 50),
+    font_size: int = 96,
+    position: Tuple[int, int] = (30, 100),
     color: Tuple[int, int, int] = (255, 0, 0)
 ) -> np.ndarray:
     """
@@ -109,9 +109,9 @@ def draw_bounding_boxes(
             label,
             (x1, y1 - 10),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
+            1.5,
             color,
-            2
+            3
         )
     
     return frame_copy

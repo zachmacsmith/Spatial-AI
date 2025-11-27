@@ -142,34 +142,62 @@ def test_preset_with_validation(preset, preset_name, video_name="video_01"):
         print("Validating Outputs...")
         print("-" * 70)
         
-        # Validate each output
-        for output_type, path in outputs.items():
-            if path:
-                print(f"\n{output_type}: {path}")
-                
-                if output_type == 'actions_csv':
-                    valid, msg = validate_csv_file(path, preset.batch_id)
-                    validation_results[output_type] = (valid, msg)
-                    print(f"  {'✓' if valid else '✗'} {msg}")
-                
-                elif output_type == 'metadata':
-                    valid, msg = validate_metadata_file(path, preset.batch_id, video_name)
-                    validation_results[output_type] = (valid, msg)
-                    print(f"  {'✓' if valid else '✗'} {msg}")
-                
-                elif output_type == 'video':
-                    valid, msg = validate_video_file(path)
-                    validation_results[output_type] = (valid, msg)
-                    print(f"  {'✓' if valid else '✗'} {msg}")
-                
-                elif output_type == 'relationships_csv':
-                    if os.path.exists(path):
-                        file_size = os.path.getsize(path)
-                        validation_results[output_type] = (True, f"File exists ({file_size} bytes)")
-                        print(f"  ✓ File exists ({file_size} bytes)")
-                    else:
-                        validation_results[output_type] = (False, "File missing")
-                        print(f"  ✗ File missing")
+        # Validate each expected output
+        # We construct expected paths to ensure they exist, rather than just trusting returned dict
+        
+        # 1. Actions CSV (Always expected by default unless disabled)
+        if preset.save_actions_csv:
+            expected_csv = Path(f"outputs/data/{preset.batch_id}/{video_name}.csv")
+            print(f"\nChecking Actions CSV: {expected_csv}")
+            
+            if expected_csv.exists():
+                valid, msg = validate_csv_file(expected_csv, preset.batch_id)
+                validation_results['actions_csv'] = (valid, msg)
+                print(f"  {'✓' if valid else '✗'} {msg}")
+            else:
+                validation_results['actions_csv'] = (False, "File missing on disk")
+                print(f"  ✗ File missing on disk")
+
+        # 2. Metadata (Always expected)
+        expected_metadata = Path(f"outputs/data/{preset.batch_id}/{video_name}_metadata.json")
+        print(f"\nChecking Metadata: {expected_metadata}")
+        
+        if expected_metadata.exists():
+            valid, msg = validate_metadata_file(expected_metadata, preset.batch_id, video_name)
+            validation_results['metadata'] = (valid, msg)
+            print(f"  {'✓' if valid else '✗'} {msg}")
+        else:
+            validation_results['metadata'] = (False, "File missing on disk")
+            print(f"  ✗ File missing on disk")
+
+        # 3. Labeled Video (If enabled)
+        if preset.generate_labeled_video:
+            expected_video = Path(f"outputs/vid_objs/{preset.batch_id}/{video_name}.mp4")
+            print(f"\nChecking Labeled Video: {expected_video}")
+            
+            if expected_video.exists():
+                valid, msg = validate_video_file(expected_video)
+                validation_results['video'] = (valid, msg)
+                print(f"  {'✓' if valid else '✗'} {msg}")
+            else:
+                validation_results['video'] = (False, "File missing on disk")
+                print(f"  ✗ File missing on disk")
+
+        # 4. Relationships CSV (If enabled)
+        if preset.save_relationships_csv and preset.enable_relationship_tracking:
+            expected_rel_csv = Path(f"outputs/data/{preset.batch_id}/{video_name}_relationships.csv")
+            print(f"\nChecking Relationships CSV: {expected_rel_csv}")
+            
+            if expected_rel_csv.exists():
+                file_size = os.path.getsize(expected_rel_csv)
+                validation_results['relationships_csv'] = (True, f"File exists ({file_size} bytes)")
+                print(f"  ✓ File exists ({file_size} bytes)")
+            else:
+                # Note: It's possible to have no relationships found, but the file might not be created?
+                # Usually output manager creates it even if empty or just header?
+                # Let's assume it should exist.
+                validation_results['relationships_csv'] = (False, "File missing on disk")
+                print(f"  ✗ File missing on disk")
         
         # Overall validation
         all_valid = all(valid for valid, _ in validation_results.values())

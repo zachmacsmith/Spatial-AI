@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 # Directory for model outputs and results
-MODEL_DATA_DIR = "Outputs/Data2/"
+MODEL_DATA_DIR = "outputs/data/"
 RESULTS_FILE = "benchmark_summary.csv"
 
 # Unified results files
@@ -66,74 +66,76 @@ def get_available_videos(directory, valid_video_ids):
     
     return video_names
 
-# Get available videos that have both model outputs and ground truth
-available_videos = get_available_videos(MODEL_DATA_DIR, gt_video_ids)
-
-if not available_videos:
-    print(f"\nNo video files found in {MODEL_DATA_DIR} that match ground truth data")
-    exit(1)
-
-print(f"\nFound {len(available_videos)} videos with both model outputs and ground truth:")
-for video in available_videos:
-    print(f"  {video}")
-
-# Ask user for selection method
-print("\nSelection options:")
-print("  A - Process all available videos")
-print("  Y/N - Ask for each video individually")
-selection_mode = input("Select mode (A/Y): ").strip().upper()
-
-videos_to_process = []
-
-if selection_mode == 'A':
-    videos_to_process = available_videos
-    print(f"\nWill process all {len(videos_to_process)} videos")
-else:
-    # Ask Y/N for each video
-    print("\nSelect videos to process:")
-    for video_name in available_videos:
-        response = input(f"Include {video_name}? (Y/N): ").strip().upper()
-        if response == 'Y':
-            videos_to_process.append(video_name)
+# This section only runs when script is executed directly, not when imported
+if __name__ == "__main__":
+    # Get available videos that have both model outputs and ground truth
+    available_videos = get_available_videos(MODEL_DATA_DIR, gt_video_ids)
     
-    if not videos_to_process:
-        print("No videos selected")
+    if not available_videos:
+        print(f"\nNo video files found in {MODEL_DATA_DIR} that match ground truth data")
         exit(1)
+    
+    print(f"\nFound {len(available_videos)} videos with both model outputs and ground truth:")
+    for video in available_videos:
+        print(f"  {video}")
+    
+    # Ask user for selection method
+    print("\nSelection options:")
+    print("  A - Process all available videos")
+    print("  Y/N - Ask for each video individually")
+    selection_mode = input("Select mode (A/Y): ").strip().upper()
+    
+    videos_to_process = []
+    
+    if selection_mode == 'A':
+        videos_to_process = available_videos
+        print(f"\nWill process all {len(videos_to_process)} videos")
+    else:
+        # Ask Y/N for each video
+        print("\nSelect videos to process:")
+        for video_name in available_videos:
+            response = input(f"Include {video_name}? (Y/N): ").strip().upper()
+            if response == 'Y':
+                videos_to_process.append(video_name)
+        
+        if not videos_to_process:
+            print("No videos selected")
+            exit(1)
+    
+    # Show what will be processed
+    print(f"\nWill benchmark {len(videos_to_process)} videos: {videos_to_process}")
+    confirm = input("Continue? (Y/N): ").strip().upper()
+    
+    if confirm != 'Y':
+        print("Cancelled")
+        exit(1)
+    
+    batch_name = input("Batch_Name: ")
+    model_version = input("Model version (e.g., TestingClass2_v1): ").strip()
+    if not model_version:
+        model_version = "unknown"
+    notes = input("Run notes (optional): ").strip()
 
-# Show what will be processed
-print(f"\nWill benchmark {len(videos_to_process)} videos: {videos_to_process}")
-confirm = input("Continue? (Y/N): ").strip().upper()
-
-if confirm != 'Y':
-    print("Cancelled")
-    exit(1)
-
-batch_name = input("Batch_Name: ")
-model_version = input("Model version (e.g., TestingClass2_v1): ").strip()
-if not model_version:
-    model_version = "unknown"
-notes = input("Run notes (optional): ").strip()
-
-RESULTS_DIR = "benchmark_results/" + batch_name
-
-# Get next run_id
-def get_next_run_id():
-    """Get the next run_id by reading existing unified results."""
-    if os.path.exists(UNIFIED_RESULTS_FILE):
-        try:
-            df = pd.read_csv(UNIFIED_RESULTS_FILE)
-            if len(df) > 0 and 'run_id' in df.columns:
-                return df['run_id'].max() + 1
-        except:
-            pass
-    return 1
-
-run_id = get_next_run_id()
-run_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-print(f"\nRun ID: {run_id}")
-print(f"Model version: {model_version}")
-if notes:
-    print(f"Notes: {notes}")
+    RESULTS_DIR = "benchmark_results/" + batch_name
+    
+    # Get next run_id
+    def get_next_run_id():
+        """Get the next run_id by reading existing unified results."""
+        if os.path.exists(UNIFIED_RESULTS_FILE):
+            try:
+                df = pd.read_csv(UNIFIED_RESULTS_FILE)
+                if len(df) > 0 and 'run_id' in df.columns:
+                    return df['run_id'].max() + 1
+            except:
+                pass
+        return 1
+    
+    run_id = get_next_run_id()
+    run_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    print(f"\nRun ID: {run_id}")
+    print(f"Model version: {model_version}")
+    if notes:
+        print(f"Notes: {notes}")
 
 ## Parse prediction label
 def parse_prediction_label(label):
@@ -310,7 +312,7 @@ def generate_accuracy_charts(results_df, output_dir):
 # ----------------------------
 # Main benchmark function
 # ----------------------------
-def run_benchmark(videos_to_process, batch_name, model_version, notes="", model_data_dir="Outputs/Data2/", batch_id=None):
+def run_benchmark(videos_to_process, batch_name, model_version, notes="", model_data_dir="outputs/data/", batch_id=None):
     """
     Run benchmark on a list of videos.
     

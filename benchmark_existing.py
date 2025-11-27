@@ -1,0 +1,123 @@
+#!/usr/bin/env python3
+"""
+Benchmark Existing Batches
+Run benchmarks on previously processed batches without re-processing videos.
+"""
+import os
+import sys
+from pathlib import Path
+
+def find_batch_folders():
+    """Find all batch folders in outputs/data/"""
+    data_dir = Path("outputs/data")
+    if not data_dir.exists():
+        print(f"❌ Directory not found: {data_dir}")
+        return []
+    
+    batch_folders = [f for f in data_dir.iterdir() if f.is_dir() and f.name.startswith("batch_")]
+    return sorted(batch_folders, reverse=True)  # Newest first
+
+def get_videos_from_batch(batch_folder):
+    """Extract video names from a batch folder"""
+    videos = set()
+    for file in batch_folder.glob("*.csv"):
+        if not file.name.endswith("_metadata.json") and not file.name.endswith("_relationships.csv"):
+            # Extract video name from filename (e.g., "video_01.csv" -> "video_01")
+            video_name = file.stem
+            videos.add(video_name)
+    return sorted(videos)
+
+def main():
+    print("=" * 70)
+    print("BENCHMARK EXISTING BATCHES")
+    print("=" * 70)
+    print()
+    
+    # Find all batch folders
+    batch_folders = find_batch_folders()
+    
+    if not batch_folders:
+        print("No batch folders found in outputs/data/")
+        return
+    
+    print(f"Found {len(batch_folders)} batch folders:\n")
+    for i, folder in enumerate(batch_folders, 1):
+        videos = get_videos_from_batch(folder)
+        print(f"{i}. {folder.name}")
+        print(f"   Videos: {', '.join(videos) if videos else 'None'}")
+        print()
+    
+    # Let user select batch(es)
+    print("Options:")
+    print("  - Enter batch number (e.g., '1')")
+    print("  - Enter 'all' to benchmark all batches")
+    print("  - Enter 'q' to quit")
+    print()
+    
+    choice = input("Select batch: ").strip().lower()
+    
+    if choice == 'q':
+        print("Cancelled.")
+        return
+    
+    batches_to_benchmark = []
+    
+    if choice == 'all':
+        batches_to_benchmark = batch_folders
+    else:
+        try:
+            idx = int(choice) - 1
+            if 0 <= idx < len(batch_folders):
+                batches_to_benchmark = [batch_folders[idx]]
+            else:
+                print(f"Invalid selection: {choice}")
+                return
+        except ValueError:
+            print(f"Invalid input: {choice}")
+            return
+    
+    # Import benchmark function (only after user has made selection)
+    try:
+        from post_processing.accuracy_benchmark import run_benchmark
+    except ImportError as e:
+        print(f"❌ Error importing benchmark: {e}")
+        print("Make sure seaborn is installed: pip install seaborn")
+        return
+    
+    # Benchmark each selected batch
+    for batch_folder in batches_to_benchmark:
+        batch_id = batch_folder.name
+        videos = get_videos_from_batch(batch_folder)
+        
+        if not videos:
+            print(f"\n⚠ Skipping {batch_id} - no videos found")
+            continue
+        
+        print("\n" + "=" * 70)
+        print(f"Benchmarking: {batch_id}")
+        print(f"Videos: {', '.join(videos)}")
+        print("=" * 70)
+        
+        # Get batch metadata
+        batch_name = input(f"Batch name (default: {batch_id}): ").strip() or batch_id
+        model_version = input("Model version (default: gemini-2.0-flash-lite): ").strip() or "gemini-2.0-flash-lite"
+        notes = input("Notes (optional): ").strip()
+        
+        # Run benchmark
+        try:
+            run_benchmark(
+                videos_to_process=videos,
+                batch_name=batch_name,
+                model_version=model_version,
+                notes=notes,
+                model_data_dir=str(batch_folder) + "/",
+                batch_id=batch_id
+            )
+            print(f"\n✓ Benchmark complete for {batch_id}")
+        except Exception as e:
+            print(f"\n❌ Error benchmarking {batch_id}: {e}")
+            import traceback
+            traceback.print_exc()
+
+if __name__ == "__main__":
+    main()

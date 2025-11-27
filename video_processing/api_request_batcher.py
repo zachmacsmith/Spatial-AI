@@ -83,23 +83,20 @@ class APIRequestBatcher:
             end_idx = min(start_idx + self.batch_size, total_requests)
             batch = self.pending_requests[start_idx:end_idx]
             
-            # Rate limiting
-            current_time = time.time()
-            time_since_last = current_time - last_request_time
-            if time_since_last < self.min_interval and batch_idx > 0:
-                wait_time = self.min_interval - time_since_last
-                print(f"  Batch {batch_idx + 1}/{num_batches}: Waiting {wait_time:.1f}s...")
-                time.sleep(wait_time)
-            
             # Process batch
             print(f"  Batch {batch_idx + 1}/{num_batches}: Processing {len(batch)} requests...")
-            batch_results = self._process_batch(batch, llm_service, prompt_builder)
+            
+            # We pass the last_request_time to _process_batch and get the updated one back
+            batch_results, last_request_time = self._process_batch(
+                batch, 
+                llm_service, 
+                prompt_builder,
+                last_request_time
+            )
             
             # Store results
             for request_id, result in batch_results.items():
                 self.results[request_id] = result
-            
-            last_request_time = time.time()
         
         print(f"✓ Batch processing complete: {len(self.results)} results")
         
@@ -110,35 +107,87 @@ class APIRequestBatcher:
     
     def _process_batch(
         self, 
-        batch: List['APIBatchRequest'],  # Forward reference as string
+        batch: List['APIBatchRequest'],
         llm_service, 
-        prompt_builder
-    ) -> Dict[str, str]:
+        prompt_builder,
+        last_request_time: float
+    ) -> Tuple[Dict[str, str], float]:
         """
-        Process a single batch of requests.
-        
-        Strategy: Send requests sequentially within batch but with minimal delay.
-        Future: Could use true batch API if provider supports it.
+        Process a single batch of requests with per-request rate limiting.
         """
         results = {}
+        current_last_time = last_request_time
         
-        for request in batch:
-            try:
-                # Send to LLM
-                response = llm_service.send_multiframe_prompt(
-                    frames=request.frames,
-                    prompt_text=request.prompt_text,
-                    max_tokens=1000,
-                    temperature=0.0
-                )
-                
-                results[request.request_id] = response.strip()
-                
-            except Exception as e:
-                print(f"    ✗ Error processing {request.request_id}: {e}")
-                results[request.request_id] = "idle"  # Default fallback
+        for i, request in enumerate(batch):
+            # Rate limiting PER REQUEST to avoid bursts
+            current_time = time.time()
+            time_since_last = current_time - current_last_time
+            
+            if time_since_last < self.min_interval:
+                wait_time = self.min_interval - time_since_last
+                if wait_time > 0.1:  # Only print if waiting significant time
+                    print(f"    Waiting {wait_time:.1f}s for rate limit...")
+                time.sleep(wait_time)
+            
+            # Retry loop for rate limits
+            # We use a high retry count because on free tier, we might need to wait significantly
+            max_retries = 10
+            retry_count = 0
+            success = False
+            
+            while retry_count <= max_retries and not success:
+                try:
+                    # Send to LLM
+                    response = llm_service.send_multiframe_prompt(
+                        frames=request.frames,
+                        prompt_text=request.prompt_text,
+                        max_tokens=1000,
+                        temperature=0.0
+                    )
+                    
+                    results[request.request_id] = response.strip()
+                    success = True
+                    
+                except Exception as e:
+                    error_str = str(e)
+                    
+                    # Check for rate limit/quota errors
+                    if "429" in error_str or "quota" in error_str.lower() or "resource exhausted" in error_str.lower():
+                        retry_count += 1
+                        if retry_count > max_retries:
+                            print(f"    ✗ Failed after {max_retries} retries: {request.request_id}")
+                            results[request.request_id] = "idle"
+                            break
+                        
+                        # Determine wait time
+                        # Default exponential backoff: 10, 20, 40...
+                        wait_time = 10 * (1.5 ** (retry_count - 1))
+                        
+                        # Try to parse wait time from error message
+                        # Example: "Please retry in 34.540668444s" or "retry_delay { seconds: 34 }"
+                        import re
+                        match = re.search(r"retry in (\d+(\.\d+)?)s", error_str)
+                        if match:
+                            wait_time = float(match.group(1)) + 2.0  # Add 2s buffer
+                        else:
+                            match = re.search(r"seconds:\s*(\d+)", error_str)
+                            if match:
+                                wait_time = float(match.group(1)) + 2.0
+                        
+                        print(f"    ⚠ Rate limit hit. Waiting {wait_time:.1f}s before retry {retry_count}/{max_retries}...")
+                        time.sleep(wait_time)
+                        
+                        # Reset last time so we don't wait again immediately for next request
+                        current_last_time = time.time()
+                    else:
+                        # Non-rate-limit error
+                        print(f"    ✗ Error processing {request.request_id}: {e}")
+                        results[request.request_id] = "idle"
+                        break
+            
+            current_last_time = time.time()
         
-        return results
+        return results, current_last_time
     
     def get_result(self, request_id: str) -> str:
         """Get result for a specific request ID"""
