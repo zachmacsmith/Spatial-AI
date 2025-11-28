@@ -20,6 +20,9 @@ def get_batch_params() -> BatchParameters:
         llm_model="claude-sonnet-4-5-20250929",
         prompting_protocol=PromptingProtocolType.CASCADE,
         state_check_method=StateCheckMethod.LEGACY_TESTING_CLASS,
+       
+        # YOLO Object Detection (Like TestingClass3)
+        enable_object_detection=True,
         object_check_method=ObjectCheckMethod.LEGACY_TESTING_CLASS,
         unknown_object_check_method=UnknownObjectCheckMethod.LLM_GUESS, # Legacy didn't have explicit unknown logic, likely just guessed or failed
         

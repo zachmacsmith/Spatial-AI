@@ -110,6 +110,7 @@ class ObjectCheckMethod(str, Enum):
     CV_THEN_LLM = "cv_then_llm"
     LLM_WITH_CV_HINT = "llm_with_cv_hint"
     LEGACY_TESTING_CLASS = "legacy_testing_class"
+    ACTION_MAPPING = "action_mapping"
 
 
 class UnknownObjectCheckMethod(str, Enum):
@@ -188,7 +189,9 @@ class BatchParameters:
     action_classification_method: ActionClassificationMethod = ActionClassificationMethod.LLM_MULTIFRAME
     allowed_actions: List[str] = field(default_factory=lambda: ["using tool", "idle", "moving"])
     tool_detection_method: ToolDetectionMethod = ToolDetectionMethod.CV_INFERENCE
-    allowed_tools: List[str] = field(default_factory=lambda: ["pencil", "saw", "measuring tape", "caulk gun", "unknown"])
+    allowed_tools: List[str] = field(default_factory=lambda: [
+        "brick trowel", "caulk gun", "drill", "pencil", "saw", "brick", "measuring", "unknown"
+    ])
     enable_relationship_tracking: bool = True
     proximity_threshold_percent: float = 0.18
     

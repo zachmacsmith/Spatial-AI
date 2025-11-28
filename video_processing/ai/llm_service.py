@@ -26,7 +26,8 @@ class LLMService(ABC):
         frames: List[np.ndarray],
         prompt_text: str,
         max_tokens: int = 1000,
-        temperature: float = 0.0
+        temperature: float = 0.0,
+        valid_options: Optional[List[str]] = None
     ) -> str:
         """Send frames + text prompt to LLM, return response"""
         pass
@@ -35,6 +36,49 @@ class LLMService(ABC):
     def get_provider_name(self) -> str:
         """Return provider name for logging/tracking"""
         pass
+
+    def _validate_response(self, response: str, valid_options: Optional[List[str]]) -> str:
+        """
+        Validate response against valid options using fuzzy matching.
+        If valid_options is None, return response as is.
+        """
+        if not valid_options:
+            print(f"LLM Raw Response (No Validation): {response}")
+            return response
+            
+        print(f"LLM Raw Response: {response}")
+            
+        import difflib
+        
+        # Normalize
+        response_lower = response.lower().strip()
+        options_lower = [opt.lower() for opt in valid_options]
+        
+        # 1. Exact match
+        if response_lower in options_lower:
+            # Return the original casing from options
+            idx = options_lower.index(response_lower)
+            return valid_options[idx]
+            
+        # 2. Substring match (if response contains option)
+        # Prioritize longer matches to avoid partial overlaps
+        sorted_options = sorted(valid_options, key=len, reverse=True)
+        for opt in sorted_options:
+            if opt.lower() in response_lower:
+                return opt
+                
+        # 3. Fuzzy match
+        matches = difflib.get_close_matches(response_lower, options_lower, n=1, cutoff=0.6)
+        if matches:
+            idx = options_lower.index(matches[0])
+            return valid_options[idx]
+            
+        # 4. Fallback: Return "unknown" if in options, else first option (legacy behavior)
+        if "unknown" in options_lower:
+            idx = options_lower.index("unknown")
+            return valid_options[idx]
+            
+        return valid_options[0]
 
 
 class ClaudeService(LLMService):
@@ -50,7 +94,8 @@ class ClaudeService(LLMService):
         frames: List[np.ndarray],
         prompt_text: str,
         max_tokens: int = 1000,
-        temperature: float = 0.0
+        temperature: float = 0.0,
+        valid_options: Optional[List[str]] = None
     ) -> str:
         """Send frames to Claude with prompt"""
         # Encode frames
@@ -74,7 +119,7 @@ class ClaudeService(LLMService):
             messages=[{"role": "user", "content": content_list}]
         )
         
-        return response.content[0].text.strip()
+        return self._validate_response(response.content[0].text.strip(), valid_options)
     
     def _encode_frames(self, frames: List[np.ndarray], width: int = 640, height: int = 360) -> List[str]:
         """Encode frames as base64 JPEG"""
@@ -106,7 +151,8 @@ class GeminiService(LLMService):
         frames: List[np.ndarray],
         prompt_text: str,
         max_tokens: int = 1000,
-        temperature: float = 0.0
+        temperature: float = 0.0,
+        valid_options: Optional[List[str]] = None
     ) -> str:
         """Send frames to Gemini with prompt"""
         import google.generativeai as genai
@@ -133,7 +179,7 @@ class GeminiService(LLMService):
             )
         )
         
-        return response.text.strip()
+        return self._validate_response(response.text.strip(), valid_options)
     
     def get_provider_name(self) -> str:
         return f"gemini_{self.model_name}"
@@ -155,7 +201,8 @@ class OpenAIService(LLMService):
         frames: List[np.ndarray],
         prompt_text: str,
         max_tokens: int = 1000,
-        temperature: float = 0.0
+        temperature: float = 0.0,
+        valid_options: Optional[List[str]] = None
     ) -> str:
         """Send frames to OpenAI with prompt"""
         # Encode frames
@@ -180,7 +227,7 @@ class OpenAIService(LLMService):
             temperature=temperature
         )
         
-        return response.choices[0].message.content.strip()
+        return self._validate_response(response.choices[0].message.content.strip(), valid_options)
     
     def _encode_frames(self, frames: List[np.ndarray], width: int = 640, height: int = 360) -> List[str]:
         """Encode frames as base64 JPEG"""

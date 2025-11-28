@@ -98,7 +98,7 @@ def save_actions_csv(
                 guess = ctx.tool_guess if ctx else ""
                 
                 # Check for change in ANY field
-                if action != current_action or tool != current_tool:
+                if action != current_action or tool != current_tool or guess != current_guess:
                     current_action = action
                     current_tool = tool
                     current_guess = guess

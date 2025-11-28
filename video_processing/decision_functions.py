@@ -8,6 +8,10 @@ import numpy as np
 
 from .context import FrameContext, ContextStore
 from .batch_parameters import BatchParameters
+from .analysis.action_mapper import ActionMapper
+
+# Instantiate global mapper
+ACTION_MAPPER = ActionMapper()
 
 @dataclass
 class DecisionContext:
@@ -23,22 +27,38 @@ class DecisionContext:
     batch_params: BatchParameters
     api_calls_used: int = 0
     
-    def call_llm(self, prompt: str, max_tokens: int = 50) -> str:
+    def call_llm(self, prompt: str, max_tokens: int = 50, valid_options: Optional[List[str]] = None, log_label: str = "LLM Call") -> str:
         """
         Wrapper for LLM calls that tracks usage.
         Increments self.api_calls_used.
         Returns stripped response text.
         """
         self.api_calls_used += 1
+        
+        print(f"\n=== {log_label} ===")
+        print(f"LLM Prompt: {prompt[:100]}...")
+        if valid_options:
+            print(f"Valid Options: {valid_options}")
+            
+        # Call LLM service
+        # We want to see the RAW response before validation for debugging
+        # But send_multiframe_prompt does validation internally.
+        # So we'll rely on the service to return the validated result,
+        # but we'll print it clearly.
+        
         result = self.llm_service.send_multiframe_prompt(
             frames=self.frames,
             prompt_text=prompt,
-            max_tokens=max_tokens
+            max_tokens=max_tokens,
+            valid_options=valid_options
         ).strip()
-        print(f"LLM Call: {result}")
+        
+        print(f"LLM Response (Validated): {result}")
+        print("==================\n")
+        
         return result
         
-    def call_llm_no_image(self, prompt: str, max_tokens: int = 50) -> str:
+    def call_llm_no_image(self, prompt: str, max_tokens: int = 50, valid_options: Optional[List[str]] = None) -> str:
         """
         LLM call without sending images (cheaper).
         For decisions that only need text context.
@@ -47,7 +67,7 @@ class DecisionContext:
         # TODO: Implement text-only call if service supports it
         # For now, just use same method but maybe empty frames? 
         # Or just pass frames anyway since our interface requires them.
-        return self.call_llm(prompt, max_tokens)
+        return self.call_llm(prompt, max_tokens, valid_options)
 
 # ==========================================
 # REGISTRIES
@@ -123,12 +143,13 @@ def state_check_llm_direct(ctx: DecisionContext) -> str:
     Ask LLM directly.
     1 API call.
     """
+    actions_str = ", ".join([f"'{a}'" for a in ctx.batch_params.allowed_actions])
     prompt = (
         f"This is a POV of a construction worker.\n\n"
         f"{ctx.context_text}\n\n"
-        f"What is the worker doing? Respond with exactly one word: 'idle', 'moving', or 'using tool'."
+        f"What is the worker doing? Respond with exactly one word from: {actions_str}."
     )
-    response = ctx.call_llm(prompt).lower()
+    response = ctx.call_llm(prompt, valid_options=ctx.batch_params.allowed_actions, log_label="State Check (Direct)").lower()
     
     if "using tool" in response or "using_tool" in response:
         return "using tool"
@@ -195,16 +216,17 @@ def state_check_legacy(ctx: DecisionContext) -> str:
     motion = ctx.frame_context.motion_score
     motion_str = f"{motion:.2f}" if motion is not None else "unknown"
     
+    actions_str = ", ".join(ctx.batch_params.allowed_actions)
     prompt = (
         f"This is a POV of a person. Motion score: {motion_str}, "
         f"a motion score of 0-0.16 suggests the person is idle, "
         f"10 or above suggests they are moving. "
         f"Check if hands are visible and classify behavior. "
-        f"Classify the action: idle, moving, using tool. "
+        f"Classify the action: {actions_str}. "
         f"Respond with ONE word only."
     )
     
-    response = ctx.call_llm(prompt).lower()
+    response = ctx.call_llm(prompt, valid_options=ctx.batch_params.allowed_actions, log_label="State Check (Legacy)").lower()
     
     if "using tool" in response or "using_tool" in response:
         return "using tool"
@@ -215,6 +237,52 @@ def state_check_legacy(ctx: DecisionContext) -> str:
     else:
         return "uncertain"
 
+@register_state_check("action_mapping")
+def state_check_with_action_mapping(ctx: DecisionContext) -> str:
+    """
+    Use ActionMapper to determine action from objects, falling back to LLM.
+    0-1 API calls.
+    """
+    # 1. Check ActionMapper for definitive actions
+    detected_objects = [d.class_name for d in ctx.frame_context.detections]
+    definitive_action = ACTION_MAPPER.get_definitive_action(detected_objects)
+    
+    if definitive_action:
+        print(f"ActionMapper found definitive action: {definitive_action}")
+        return definitive_action
+        
+    # 2. Get likely actions for hints
+    likely_actions = ACTION_MAPPER.get_likely_actions(detected_objects)
+    
+    # Combine likely actions with allowed actions
+    valid_options = list(set(ctx.batch_params.allowed_actions + likely_actions))
+    actions_str = ", ".join([f"'{a}'" for a in valid_options])
+    
+    hint_text = ""
+    if likely_actions:
+        hint_text = f"Based on objects ({', '.join(detected_objects)}), likely actions are: {', '.join(likely_actions)}.\n"
+    
+    prompt = (
+        f"This is a POV of a construction worker.\n\n"
+        f"{ctx.context_text}\n\n"
+        f"{hint_text}"
+        f"What is the worker doing? Respond with exactly one word from: {actions_str}."
+    )
+    
+    response = ctx.call_llm(prompt, valid_options=valid_options, log_label="State Check (Mapped)").lower()
+    
+    if "using tool" in response or "using_tool" in response:
+        return "using tool"
+    elif "moving" in response:
+        return "moving"
+    elif "idle" in response:
+        return "idle"
+    # Return mapped actions directly
+    elif response in likely_actions:
+        return response
+    else:
+        return "uncertain"
+
 # ==========================================
 # OBJECT CHECK IMPLEMENTATIONS
 # ==========================================
@@ -222,17 +290,27 @@ def state_check_legacy(ctx: DecisionContext) -> str:
 @register_object_check("cv_detection")
 def object_check_cv(ctx: DecisionContext) -> str:
     """
-    Return first detected tool from CV.
+    Return first detected tool from CV, or mapped action (e.g. measuring).
     0 API calls.
     """
+    # 1. Check ActionMapper for definitive actions (e.g. pencil + tape -> measuring)
+    detected_objects = [d.class_name for d in ctx.frame_context.detections]
+    definitive_action = ACTION_MAPPER.get_definitive_action(detected_objects)
+    
+    if definitive_action:
+        return definitive_action
+
     ignored = {"person", "hand", "hardhat", "safety vest", "glove", "helmet", "vest", "face"}
     tools = [d for d in ctx.frame_context.detections if d.class_name not in ignored]
     
     if tools:
         # Sort by confidence
         tools.sort(key=lambda x: x.confidence, reverse=True)
-        return tools[0].class_name
+        result = tools[0].class_name
+        print(f"\n=== Object Check (CV) ===\nDetected: {result} (from {len(tools)} tools)\n==================\n")
+        return result
         
+    print(f"\n=== Object Check (CV) ===\nDetected: unknown (no valid tools)\n==================\n")
     return "unknown"
 
 @register_object_check("llm_direct")
@@ -247,7 +325,7 @@ def object_check_llm(ctx: DecisionContext) -> str:
         f"What tool are they using? Respond with the tool name only (e.g., 'drill', 'hammer'). "
         f"If you cannot identify it, respond with 'unknown'."
     )
-    response = ctx.call_llm(prompt).lower().strip()
+    response = ctx.call_llm(prompt, valid_options=ctx.batch_params.allowed_tools, log_label="Object Check (Direct)").lower().strip()
     return response
 
 @register_object_check("cv_then_llm")
@@ -279,7 +357,7 @@ def object_check_llm_hint(ctx: DecisionContext) -> str:
         f"What tool are they using? Confirm the suggestion or provide a better name. "
         f"Respond with the tool name only."
     )
-    return ctx.call_llm(prompt).lower().strip()
+    return ctx.call_llm(prompt, valid_options=ctx.batch_params.allowed_tools, log_label="Object Check (Hint)").lower().strip()
 
 @register_object_check("legacy_testing_class")
 def object_check_legacy(ctx: DecisionContext) -> str:
@@ -287,12 +365,13 @@ def object_check_legacy(ctx: DecisionContext) -> str:
     Replicate TestingClass.py logic (ask_claude_which_tool).
     1 API call.
     """
+    tools_str = ", ".join(ctx.batch_params.allowed_tools)
     prompt = (
         f"This is a POV of a person using a tool.\n"
-        f"What tool is being used?\n"
+        f"What tool is being used? (e.g. {tools_str})\n"
         f"Respond with the tool name only."
     )
-    return ctx.call_llm(prompt).lower().strip()
+    return ctx.call_llm(prompt, valid_options=ctx.batch_params.allowed_tools, log_label="Object Check (Legacy)").lower().strip()
 
 # ==========================================
 # UNKNOWN OBJECT CHECK IMPLEMENTATIONS
@@ -309,7 +388,7 @@ def unknown_check_llm(ctx: DecisionContext) -> str:
         f"Look closely at the image.\n"
         f"What tool or object are they using? Be specific (1-4 words)."
     )
-    return ctx.call_llm(prompt).lower().strip()
+    return ctx.call_llm(prompt, log_label="Unknown Check (Guess)").lower().strip()
 
 @register_unknown_object_check("llm_guess_with_options")
 def unknown_check_options(ctx: DecisionContext) -> str:
@@ -326,7 +405,7 @@ def unknown_check_options(ctx: DecisionContext) -> str:
         f"4. Another tool\n\n"
         f"Respond with your best guess of the specific object name."
     )
-    return ctx.call_llm(prompt).lower().strip()
+    return ctx.call_llm(prompt, log_label="Unknown Check (Options)").lower().strip()
 
 @register_unknown_object_check("cv_class_name")
 def unknown_check_cv(ctx: DecisionContext) -> str:
@@ -366,6 +445,7 @@ def unknown_check_temporal_majority(ctx: DecisionContext) -> str:
         
     # Get most common
     most_common = tool_counts.most_common(1)[0][0]
+    print(f"\n=== Unknown Check (Temporal) ===\nGuess: {most_common} (from history)\n==================\n")
     return most_common
 
 @register_unknown_object_check("skip")
