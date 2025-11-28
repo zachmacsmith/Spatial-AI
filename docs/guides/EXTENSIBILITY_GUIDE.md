@@ -1,6 +1,199 @@
-# Extensibility Guide - Adding New Methods & Architectures
+# Extensibility Guide - Customizing the Video Processing System
 
-A comprehensive guide to extending the video processing system with custom methods, prompting architectures, and experimental features.
+A comprehensive guide to extending and customizing the video processing system.
+
+---
+
+## Table of Contents
+
+1. [Configuration & Batch Parameters](#configuration--batch-parameters)
+2. [Creating Custom Presets](#creating-custom-presets)
+3. [Custom Decision Logic (The "Brain")](#custom-decision-logic)
+4. [Custom Processing Strategies (The "Flow")](#custom-processing-strategies)
+5. [Adding New AI Models](#adding-new-ai-models)
+
+---
+
+## Configuration & Batch Parameters
+
+The system is controlled by `BatchParameters` in `video_processing/batch_parameters.py`. This class contains over 40 parameters organized into categories.
+
+### Key Parameter Categories
+
+1.  **AI Models**: `llm_provider`, `llm_model`, `cv_model`
+2.  **Prompt Engineering**: `prompt_template`, `prompting_protocol`
+3.  **Decision Logic**: `state_check_method`, `object_check_method`, `unknown_object_check_method`
+4.  **Analysis Methods**: `action_classification_method`, `tool_detection_method`
+5.  **Processing**: `processing_strategy`, `num_frames_per_interval`
+6.  **Output**: `generate_labeled_video`, `save_actions_csv`
+
+**Tip**: Read `video_processing/batch_parameters.py` for the full list of parameters and their default values.
+
+---
+
+## Creating Custom Presets
+
+Presets are pre-configured `BatchParameters` instances that allow you to quickly switch between different processing modes.
+
+### Step 1: Create a Preset File
+
+Create a new file in the `presets/` directory, e.g., `presets/my_custom_preset.py`.
+
+```python
+from video_processing.batch_parameters import (
+    BatchParameters, 
+    LLMProvider, 
+    PromptingProtocolType,
+    StateCheckMethod
+)
+
+def get_batch_params() -> BatchParameters:
+    return BatchParameters(
+        config_name="my_custom_preset",
+        config_description="My custom configuration for specific site conditions",
+        
+        # AI Configuration
+        llm_provider=LLMProvider.CLAUDE,
+        llm_model="claude-sonnet-4-5-20250929",
+        
+        # Logic Configuration
+        prompting_protocol=PromptingProtocolType.CASCADE,
+        state_check_method=StateCheckMethod.HYBRID_MOTION_THEN_LLM,
+        
+        # Custom Tweak
+        motion_score_threshold_idle=0.20  # Higher threshold for windy conditions
+    )
+
+def get_name() -> str:
+    return "My Custom Preset"
+
+def get_description() -> str:
+    return "Optimized for windy outdoor sites"
+```
+
+### Step 2: Use Your Preset
+
+The `run_batch.py` runner automatically discovers files in the `presets/` directory.
+1. Run `python run_batch.py`
+2. Your new preset will appear in the list!
+
+---
+
+## Custom Decision Logic
+
+The system uses a **pluggable decision system** defined in `video_processing/decision_functions.py`. This allows you to define exactly *how* the system decides on:
+1.  **State** (Idle vs. Moving vs. Using Tool)
+2.  **Object** (Drill vs. Hammer)
+3.  **Unknown Objects** (Guessing logic)
+
+### Core Concept: The Registry Pattern
+
+You define a function and decorate it to register it. The system then finds it by name.
+
+### Example: Adding a "Safety First" State Check
+
+Let's create a state check that is very sensitive to movement.
+
+**File**: `video_processing/decision_functions.py` (or a new file you import)
+
+```python
+from .decision_functions import register_state_check, DecisionContext
+
+@register_state_check("safety_sensitive")
+def state_check_safety(ctx: DecisionContext) -> str:
+    """
+    Classifies as 'moving' even with very slight motion to ensure safety.
+    """
+    motion = ctx.frame_context.motion_score
+    
+    # Ultra-sensitive threshold
+    if motion is not None and motion > 0.05:
+        return "moving"
+        
+    # Fallback to standard check for other cases
+    return "idle"
+```
+
+**Usage**:
+Update your preset to use `state_check_method=StateCheckMethod.CUSTOM` (you'll need to add this enum or pass the string "safety_sensitive" if you modify the enum).
+
+### Available Registries
+
+*   `@register_state_check("name")`: Returns "idle", "moving", or "using tool".
+*   `@register_object_check("name")`: Returns tool name.
+*   `@register_unknown_object_check("name")`: Returns guess for unknown objects.
+
+### The `DecisionContext` Object
+
+Your functions receive a `DecisionContext` object containing:
+*   `frames`: List of image arrays
+*   `frame_context`: Data about the current frame (detections, motion)
+*   `context_store`: History of previous frames
+*   `llm_service`: Interface to call LLM
+*   `batch_params`: Current configuration
+
+---
+
+## Custom Processing Strategies
+
+Processing strategies control **which frames** are processed and in what order. They are defined in `video_processing/processing_strategies.py`.
+
+### Example: "Start and End" Strategy
+
+Process only the first and last 5 seconds of video.
+
+**File**: `video_processing/processing_strategies.py`
+
+```python
+from .processing_strategies import register_processing_strategy
+
+@register_processing_strategy("start_end_only")
+def strategy_start_end(
+    keyframe_numbers, frame_count, context_store, 
+    # ... other args ...
+    **kwargs
+) -> List[str]:
+    
+    # Logic to select only frames in first/last 5 seconds
+    # ...
+    
+    return frame_labels
+```
+
+**Usage**:
+Set `processing_strategy=ProcessingStrategy.CUSTOM` (or string "start_end_only") in `BatchParameters`.
+
+---
+
+## Adding New AI Models
+
+### Adding a New LLM Provider
+
+1.  Create a class inheriting from `LLMService` in `video_processing/ai/llm_service.py`.
+2.  Implement `send_multiframe_prompt`.
+3.  Update `get_llm_service` factory function.
+4.  Add to `LLMProvider` enum in `batch_parameters.py`.
+
+### Adding a New CV Model
+
+1.  Create a class inheriting from `CVService` in `video_processing/ai/cv_service.py`.
+2.  Implement `detect_objects`.
+3.  Update `get_cv_service` factory function.
+4.  Add to `CVModel` enum in `batch_parameters.py`.
+
+---
+
+## Summary of Core Modules
+
+| Module | Purpose | Customizability |
+|--------|---------|-----------------|
+| `batch_parameters.py` | Configuration | Change values, add new params |
+| `decision_functions.py` | Logic for single decisions | Add new `@register_...` functions |
+| `processing_strategies.py` | Timeline processing logic | Add new `@register_processing_strategy` |
+| `prompt_builder.py` | LLM Prompt construction | Add new templates |
+| `output_manager.py` | CSV/JSON generation | Modify output formats |
+
+Happy extending! 🚀
 
 ---
 

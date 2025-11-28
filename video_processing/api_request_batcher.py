@@ -46,6 +46,7 @@ class APIRequestBatcher:
         
         self.pending_requests: List[APIBatchRequest] = []
         self.results: Dict[str, str] = {}
+        self.total_requests: int = 0
         
         print(f"API Request Batcher: batch_size={batch_size}, "
               f"rate_limit={requests_per_minute} req/min")
@@ -147,6 +148,7 @@ class APIRequestBatcher:
                     
                     results[request.request_id] = response.strip()
                     success = True
+                    self.total_requests += 1
                     
                 except Exception as e:
                     error_str = str(e)

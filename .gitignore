@@ -10,6 +10,8 @@ shared/config.py
 .env.*
 secrets/
 *.key
+benchmark_results/
+.gemini/
 archived/
 
 # ============================================================================

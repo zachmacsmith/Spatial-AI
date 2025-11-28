@@ -25,6 +25,127 @@ OPENAI_API_KEY = "your-openai-api-key"     # Optional
 
 ### 3. Run Processing
 
+The system now uses a unified runner that supports presets.
+
+**Interactive Runner:**
+
+```bash
+python run_batch.py
+```
+
+This will launch a menu where you can:
+1. Select a **Preset** (e.g., "Legacy + Temporal Majority")
+2. Toggle **Video Generation** (Enable for visualization, Disable for speed)
+3. Select **Videos** to process
+
+### 4. Benchmark Results
+
+To evaluate accuracy against ground truth:
+
+```bash
+python benchmark_existing.py
+```
+
+This tool will:
+1. List all processed batches
+2. Calculate accuracy metrics (State, Object, Guess)
+3. Generate accuracy charts
+4. Output detailed CSV reports to `benchmark_results/`
+
+---
+
+## Configuration & Customization
+
+The system is designed to be highly extensible. You can customize:
+1.  **Batch Parameters**: Over 40 options to control every aspect of processing.
+2.  **Presets**: Create your own reusable configurations.
+3.  **Decision Logic**: Plug in your own Python functions for state/object classification.
+4.  **Processing Strategies**: Define custom timeline processing logic.
+
+### 📚 Guides
+
+*   **[Extensibility Guide](docs/guides/EXTENSIBILITY_GUIDE.md)**: The complete reference for customizing the system. Covers Batch Parameters, Custom Presets, and Custom Decision Functions.
+*   **[Presets Guide](docs/guides/presets_guide.md)**: Detailed explanation of included presets.
+*   **[Helper Functions Guide](docs/guides/helper_functions_guide.md)**: Reference for utility functions.
+
+### 🚀 Example Usage
+
+Check `example_usage.py` for practical code examples:
+
+```bash
+python example_usage.py
+```
+
+It demonstrates:
+*   Using standard presets
+*   Creating custom configurations programmatically
+*   Batch processing multiple videos
+*   Comparing different CV models
+
+---
+
+## Available Presets
+
+The system comes with several tuned presets:
+
+- **Legacy + Temporal Majority** (`legacy_temporal`): **(Recommended)** Replicates the original logic but uses temporal majority voting to identify unknown objects.
+- **Legacy** (`legacy`): Exact replication of the original `TestingClass.py` logic.
+- **Balanced** (`balanced`): Hybrid approach using Motion/CV first, falling back to LLM. Good trade-off.
+- **Thorough** (`thorough`): Maximum accuracy using LLM for all decisions. High cost.
+- **Cheap** (`cheap`): Lowest cost using only Motion Threshold and CV. No LLM costs.
+
+---
+
+## Output Structure
+
+All outputs are organized by batch ID:
+
+```
+outputs/
+├── data/
+│   └── batch_20251128_.../
+│       ├── video_01.csv                  # Action classifications
+│       ├── video_01_relationships.csv    # Object relationships
+│       └── video_01_metadata.json        # Metadata & Performance stats
+├── vid_objs/
+│   └── batch_20251128_.../
+│       └── video_01.mp4                  # Labeled video
+└── batch_tracking/
+    └── batch_20251128_...json            # Batch configuration
+```
+
+---
+
+## Support
+
+For questions or issues, check:
+1. `presets/` - Example configurations
+2. `docs/guides/` - Detailed guides
+3. `video_processing/batch_parameters.py` - All configuration options
+
+---
+
+## Quick Start
+
+### 1. Setup Environment
+
+```bash
+conda env create -f environment.yml
+conda activate egoenv
+```
+
+### 2. Configure API Keys
+
+Create `config.py` in the root directory:
+
+```python
+GEMINI_API_KEY = "your-gemini-api-key"
+ANTHROPIC_API_KEY = "your-claude-api-key"  # Optional
+OPENAI_API_KEY = "your-openai-api-key"     # Optional
+```
+
+### 3. Run Processing
+
 **Option A: Use Presets (Recommended)**
 
 ```python

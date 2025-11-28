@@ -30,11 +30,13 @@ class DecisionContext:
         Returns stripped response text.
         """
         self.api_calls_used += 1
-        return self.llm_service.send_multiframe_prompt(
+        result = self.llm_service.send_multiframe_prompt(
             frames=self.frames,
             prompt_text=prompt,
             max_tokens=max_tokens
         ).strip()
+        print(f"LLM Call: {result}")
+        return result
         
     def call_llm_no_image(self, prompt: str, max_tokens: int = 50) -> str:
         """
@@ -184,6 +186,35 @@ def state_check_cv_objects(ctx: DecisionContext) -> str:
     else:
         return "moving"
 
+@register_state_check("legacy_testing_class")
+def state_check_legacy(ctx: DecisionContext) -> str:
+    """
+    Replicate TestingClass.py logic.
+    1 API call.
+    """
+    motion = ctx.frame_context.motion_score
+    motion_str = f"{motion:.2f}" if motion is not None else "unknown"
+    
+    prompt = (
+        f"This is a POV of a person. Motion score: {motion_str}, "
+        f"a motion score of 0-0.16 suggests the person is idle, "
+        f"10 or above suggests they are moving. "
+        f"Check if hands are visible and classify behavior. "
+        f"Classify the action: idle, moving, using tool. "
+        f"Respond with ONE word only."
+    )
+    
+    response = ctx.call_llm(prompt).lower()
+    
+    if "using tool" in response or "using_tool" in response:
+        return "using tool"
+    elif "moving" in response:
+        return "moving"
+    elif "idle" in response:
+        return "idle"
+    else:
+        return "uncertain"
+
 # ==========================================
 # OBJECT CHECK IMPLEMENTATIONS
 # ==========================================
@@ -250,6 +281,19 @@ def object_check_llm_hint(ctx: DecisionContext) -> str:
     )
     return ctx.call_llm(prompt).lower().strip()
 
+@register_object_check("legacy_testing_class")
+def object_check_legacy(ctx: DecisionContext) -> str:
+    """
+    Replicate TestingClass.py logic (ask_claude_which_tool).
+    1 API call.
+    """
+    prompt = (
+        f"This is a POV of a person using a tool.\n"
+        f"What tool is being used?\n"
+        f"Respond with the tool name only."
+    )
+    return ctx.call_llm(prompt).lower().strip()
+
 # ==========================================
 # UNKNOWN OBJECT CHECK IMPLEMENTATIONS
 # ==========================================
@@ -291,6 +335,38 @@ def unknown_check_cv(ctx: DecisionContext) -> str:
     0 API calls.
     """
     return object_check_cv(ctx)
+
+@register_unknown_object_check("temporal_majority")
+def unknown_check_temporal_majority(ctx: DecisionContext) -> str:
+    """
+    Guess based on majority of tools seen in recent history.
+    0 API calls.
+    """
+    from collections import Counter
+    
+    # Get all frames from context store
+    # (In a real scenario, we might want to limit to last N seconds, 
+    # but context_store.frames is already a windowed deque)
+    history = ctx.context_store.frames
+    
+    if not history:
+        return "unknown"
+        
+    ignored = {"person", "hand", "hardhat", "safety vest", "glove", "helmet", "vest", "face", "arm", "leg"}
+    tool_counts = Counter()
+    
+    for frame_ctx in history:
+        for detection in frame_ctx.detections:
+            name = detection.class_name.lower()
+            if name not in ignored:
+                tool_counts[name] += 1
+                
+    if not tool_counts:
+        return "unknown"
+        
+    # Get most common
+    most_common = tool_counts.most_common(1)[0][0]
+    return most_common
 
 @register_unknown_object_check("skip")
 def unknown_check_skip(ctx: DecisionContext) -> str:

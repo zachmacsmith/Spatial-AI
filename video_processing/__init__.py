@@ -18,7 +18,15 @@ from .batch_parameters import (
     PRESET_OBJECTS,
     PRESET_RELATIONSHIPS,
     PRESET_HTML_ANALYSIS,
-    PRESET_FULL
+    PRESET_FULL,
+    PromptingProtocolType,
+    StateCheckMethod,
+    ObjectCheckMethod,
+    UnknownObjectCheckMethod,
+    PRESET_BASELINE,
+    PRESET_CHEAP,
+    PRESET_BALANCED,
+    PRESET_THOROUGH
 )
 
 from .video_processor import process_video
@@ -34,5 +42,13 @@ __all__ = [
     'PRESET_HTML_ANALYSIS',
     'StorageBackend',
     'ContextStrategy',
-    'ProcessingStrategy'
+    'ProcessingStrategy',
+    'PromptingProtocolType',
+    'StateCheckMethod',
+    'ObjectCheckMethod',
+    'UnknownObjectCheckMethod',
+    'PRESET_BASELINE',
+    'PRESET_CHEAP',
+    'PRESET_BALANCED',
+    'PRESET_THOROUGH'
 ]

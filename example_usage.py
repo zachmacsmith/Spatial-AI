@@ -37,27 +37,37 @@ def example_full():
 # ==========================================
 
 def example_custom():
-    """Create custom configuration"""
+    """Create custom configuration using new decision system"""
+    from video_processing import (
+        BatchParameters, 
+        LLMProvider, 
+        PromptingProtocolType,
+        StateCheckMethod,
+        UnknownObjectCheckMethod
+    )
+    
     params = BatchParameters(
         config_name="custom_experiment",
-        config_description="Testing Gemini with YOLO v8",
+        config_description="Testing Cascade Protocol with Temporal Majority",
         
-        # Use Gemini instead of Claude
-        llm_provider="gemini",
-        llm_model="gemini-1.5-pro",
+        # Use Claude
+        llm_provider=LLMProvider.CLAUDE,
+        llm_model="claude-sonnet-4-5-20250929",
         
-        # Use YOLO v8
-        cv_model="yolo_v8",
-        cv_model_path="weights_v8.pt",
+        # Use Cascade Protocol (Cheaper & Faster)
+        prompting_protocol=PromptingProtocolType.CASCADE,
         
-        # Enable all features
+        # Custom Decision Logic
+        state_check_method=StateCheckMethod.HYBRID_MOTION_THEN_LLM,
+        unknown_object_check_method=UnknownObjectCheckMethod.TEMPORAL_MAJORITY,
+        
+        # Enable features
         enable_object_detection=True,
         enable_relationship_tracking=True,
-        enable_productivity_analysis=False,  # Not yet implemented
         
         # Custom parameters
-        cv_confidence_threshold=0.7,  # Higher threshold
-        max_workers_keyframes=16,  # More parallelism
+        cv_confidence_threshold=0.6,
+        max_workers_keyframes=8,
     )
     
     outputs = process_video("video_01", params)

@@ -44,7 +44,7 @@ def _interpolate_from_keyframes(
     for kf in keyframe_numbers:
         ctx = context_store.get(kf)
         if ctx and ctx.action:
-            classified_frames.append((kf, ctx.action))
+            classified_frames.append((kf, ctx))
             
     if not classified_frames:
         return ["idle"] * frame_count
@@ -60,11 +60,13 @@ def _interpolate_from_keyframes(
         nearest_dist = float('inf')
         nearest_action = "idle"
         
-        for kf, action in classified_frames:
+        for kf, ctx in classified_frames:
             dist = abs(frame_num - kf)
             if dist < nearest_dist:
                 nearest_dist = dist
-                nearest_action = action
+                nearest_action = ctx.action
+                nearest_tool = ctx.tool
+                nearest_guess = ctx.tool_guess
             elif dist == nearest_dist:
                 # Tie-break: prefer earlier frame (arbitrary but consistent)
                 pass
@@ -74,6 +76,20 @@ def _interpolate_from_keyframes(
                 break
                 
         frame_labels[i] = nearest_action
+        
+        # Update context store for this frame
+        current_ctx = context_store.get(frame_num)
+        if not current_ctx:
+            # Create minimal context if missing
+            # We need timestamp. context_store has fps.
+            timestamp = frame_num / context_store.fps
+            current_ctx = FrameContext(frame_num, timestamp)
+            context_store.add(current_ctx)
+            
+        # Set interpolated values
+        current_ctx.action = nearest_action
+        current_ctx.tool = nearest_tool
+        current_ctx.tool_guess = nearest_guess
         
     return frame_labels
 
@@ -228,10 +244,36 @@ def strategy_classify_all(
         for f in range(start, end):
             frame_labels[f] = result.action
             
+            # Update context store for interval frames
+            ctx = context_store.get(f)
+            if not ctx:
+                # Create minimal context if missing
+                timestamp = f / context_store.fps
+                ctx = FrameContext(f, timestamp)
+                context_store.add(ctx)
+            
+            ctx.action = result.action
+            ctx.tool = result.tool
+            ctx.tool_guess = result.tool_guess
+            ctx.api_calls_used = 0  # Amortized or 0 for interval frames
+            
     # Fill tail
     last_kf = keyframe_numbers[-1]
     for f in range(last_kf, frame_count):
         frame_labels[f] = frame_labels[last_kf - 1]
+        
+        # Update context store for tail frames
+        ctx = context_store.get(f + 1) # frame_labels is 0-indexed, context is 1-indexed
+        if not ctx:
+            timestamp = (f + 1) / context_store.fps
+            ctx = FrameContext(f + 1, timestamp)
+            context_store.add(ctx)
+            
+        last_ctx = context_store.get(last_kf)
+        if last_ctx:
+            ctx.action = last_ctx.action
+            ctx.tool = last_ctx.tool
+            ctx.tool_guess = last_ctx.tool_guess
         
     print(f"  Total API calls: {total_api_calls}")
     return frame_labels

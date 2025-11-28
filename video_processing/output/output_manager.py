@@ -177,7 +177,8 @@ def save_batch_metadata(
     video_name: str,
     batch_params,
     processing_time: Optional[float] = None,
-    output_files: Optional[Dict[str, str]] = None
+    output_files: Optional[Dict[str, str]] = None,
+    performance_stats: Optional[Dict] = None
 ) -> str:
     """
     Save batch metadata for this video processing run.
@@ -189,12 +190,14 @@ def save_batch_metadata(
     - Model versions
     - Processing time
     - Output file paths
+    - Performance statistics
     
     Args:
         video_name: Name of video
         batch_params: BatchParameters instance
         processing_time: Optional processing time in seconds
         output_files: Optional dict of output_type -> file_path
+        performance_stats: Optional dict of performance statistics
     
     Returns:
         Path to saved metadata file
@@ -222,6 +225,9 @@ def save_batch_metadata(
     
     if output_files is not None:
         metadata['output_files'] = output_files
+        
+    if performance_stats is not None:
+        metadata['performance'] = performance_stats
     
     with open(metadata_path, 'w') as f:
         json.dump(metadata, f, indent=2)

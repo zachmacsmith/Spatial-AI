@@ -36,7 +36,15 @@ def load_ground_truth(csv_path='TestData/LabelledData.csv'):
     
     available_video_ids = sorted(df['Video ID'].unique())
     
-    return df[['Video ID', 'Timestamp', 'State', 'Object']], available_video_ids
+    # Ensure Unknown Object column exists
+    if 'Unknown Object' not in df.columns:
+        df['Unknown Object'] = 'Unknown'
+    else:
+        df['Unknown Object'] = df['Unknown Object'].fillna('Unknown')
+        df['Unknown Object'] = df['Unknown Object'].replace('', 'Unknown')
+        df['Unknown Object'] = df['Unknown Object'].astype(str).replace('nan', 'Unknown')
+    
+    return df[['Video ID', 'Timestamp', 'State', 'Object', 'Unknown Object']], available_video_ids
 
 # Load ground truth data and get available video IDs
 print("Loading ground truth data...")
@@ -146,22 +154,66 @@ def parse_prediction_label(label):
 def load_labeled_data(csv_path):
     """
     Load labeled data from CSV and convert frames to timestamps.
+    Handles both legacy and new formats.
     
     Returns:
         tuple: (DataFrame, total_duration)
     """
+    # Read metadata
     with open(csv_path, 'r') as f:
-        first_line = f.readline().strip().split(',')
-        fps = float(first_line[0])
-        total_duration = float(first_line[1])
+        header_line = f.readline().strip().split(',')
+        metadata_line = f.readline().strip().split(',')
+        
+        try:
+            # Check if first line is values (legacy) or header (new)
+            # If first line has 'fps' string, it's a header, so use second line values
+            if 'fps' in header_line[0].lower():
+                fps = float(metadata_line[0])
+                total_duration = float(metadata_line[1])
+            else:
+                # Legacy: first line is values
+                fps = float(header_line[0])
+                total_duration = float(header_line[1])
+        except ValueError:
+            # Fallback
+            fps = 30.0
+            total_duration = 0.0
+            
+    # Try to determine header row
+    # New format has header on line 3 (index 2)
+    # Legacy format has no header, just data starting line 2
     
-    df = pd.read_csv(csv_path, skiprows=1, names=['frame', 'label', 'object'])
+    try:
+        # Try reading with header on line 3 (0-indexed index 2)
+        df = pd.read_csv(csv_path, header=2)
+        
+        # Check if it looks like the new format
+        if 'frame' in df.columns and 'action' in df.columns:
+            # New format
+            df = df.rename(columns={'action': 'label', 'tool': 'object'})
+            if 'tool_guess' not in df.columns:
+                df['tool_guess'] = 'Unknown'
+        else:
+            # Fallback/Legacy check
+            raise ValueError("Not new format")
+            
+    except Exception:
+        # Fallback to legacy read (skip 1 line of metadata, then data)
+        df = pd.read_csv(csv_path, skiprows=1, names=['frame', 'label', 'object'])
+        df['tool_guess'] = 'Unknown'
+
+    # Ensure frame is numeric
+    df['frame'] = pd.to_numeric(df['frame'], errors='coerce')
+    df = df.dropna(subset=['frame'])
+    
     df['timestamp'] = (df['frame'] - 1) / fps
     
     # Replace NaN, empty strings, or None with "Unknown"
-    df['object'] = df['object'].fillna('Unknown')
-    df['object'] = df['object'].replace('', 'Unknown')
-    df['object'] = df['object'].astype(str).replace('nan', 'Unknown')
+    for col in ['object', 'tool_guess']:
+        if col in df.columns:
+            df[col] = df[col].fillna('Unknown')
+            df[col] = df[col].replace('', 'Unknown')
+            df[col] = df[col].astype(str).replace('nan', 'Unknown')
     
     return df, total_duration
 
@@ -189,13 +241,24 @@ def calculate_overlap(predicted_df, ground_truth_df, video_id, total_duration):
         end_idx = int(end_time / resolution)
         
         state = parse_prediction_label(predicted_df.iloc[i]['label'])
+        
+        # Effective Object Logic (Prediction)
         obj = predicted_df.iloc[i]['object']
+        guess = predicted_df.iloc[i]['tool_guess']
+        
         if pd.isna(obj) or obj == '' or str(obj) == 'nan':
             obj = 'Unknown'
+        if pd.isna(guess) or guess == '' or str(guess) == 'nan':
+            guess = 'Unknown'
+            
+        # If primary object is unknown/using unknown, use guess
+        effective_obj = obj
+        if (obj.lower() == 'unknown' or obj.lower() == 'using unknown') and guess.lower() != 'unknown':
+            effective_obj = guess
         
         for idx in range(start_idx, min(end_idx, timeline_length)):
             pred_state[idx] = state
-            pred_object[idx] = obj
+            pred_object[idx] = effective_obj
     
     # Fill ground truth timeline
     for i in range(len(gt)):
@@ -206,13 +269,24 @@ def calculate_overlap(predicted_df, ground_truth_df, video_id, total_duration):
         end_idx = int(end_time / resolution)
         
         state = gt.iloc[i]['State']
+        
+        # Effective Object Logic (Ground Truth)
         obj = gt.iloc[i]['Object']
+        unknown_obj = gt.iloc[i]['Unknown Object'] if 'Unknown Object' in gt.columns else 'Unknown'
+        
         if pd.isna(obj) or obj == '' or str(obj) == 'nan':
             obj = 'Unknown'
+        if pd.isna(unknown_obj) or unknown_obj == '' or str(unknown_obj) == 'nan':
+            unknown_obj = 'Unknown'
+            
+        # If primary object is unknown, use specific unknown object
+        effective_gt_obj = obj
+        if obj.lower() == 'unknown' and unknown_obj.lower() != 'unknown':
+            effective_gt_obj = unknown_obj
         
         for idx in range(start_idx, min(end_idx, timeline_length)):
             gt_state[idx] = state
-            gt_object[idx] = obj
+            gt_object[idx] = effective_gt_obj
     
     # Calculate state accuracy
     state_correct = sum(1 for i in range(timeline_length) if pred_state[i] == gt_state[i])
@@ -227,12 +301,125 @@ def calculate_overlap(predicted_df, ground_truth_df, video_id, total_duration):
         object_accuracy = object_correct / len(using_tool_indices)
     else:
         object_accuracy = None
+        
+    # Calculate Guess Metrics
+    # 1. Identify times where model was unsure (Unknown)
+    # 2. Check if it made a guess
+    # 3. Check if guess was correct
+    
+    unknown_pred_indices = []
+    guesses_made_indices = []
+    correct_guesses_indices = []
+    
+    for i in range(timeline_length):
+        # Check original prediction (before effective object logic)
+        # We need to look at the raw data, but here we only have the timeline arrays which already used effective logic.
+        # However, we can infer "Unknown" prediction if the effective object came from a guess, 
+        # OR we can re-check the source dataframe. 
+        # Simpler approach: Check if the *primary* object in prediction was Unknown.
+        # Since we don't have the raw primary object in the timeline arrays (we overwrote it with effective),
+        # we'll approximate: If pred_state is 'using tool' and pred_object is NOT Unknown, 
+        # but the logic used a guess... wait, we need to track this during the loop.
+        pass
+
+    # Better approach: Re-iterate or track during filling.
+    # Let's track counts during the filling loop? No, resolution might duplicate.
+    # Let's re-calculate using the dataframe for exactness, or just use the timeline if we store more info.
+    
+    # Let's redo the timeline filling to store "is_guess" flag
+    pass
+    
+    # Actually, let's just do it on the dataframe level for simplicity? 
+    # No, we need time-weighted overlap.
+    
+    # Let's add a "guess_made" and "raw_object" timeline
+    guess_made = [False] * timeline_length
+    
+    # Refill loop for guess tracking (or merge with above, but for now separate for clarity/safety in replacement)
+    for i in range(len(predicted_df)):
+        start_time = predicted_df.iloc[i]['timestamp']
+        end_time = predicted_df.iloc[i+1]['timestamp'] if i+1 < len(predicted_df) else total_duration
+        start_idx = int(start_time / resolution)
+        end_idx = int(end_time / resolution)
+        
+        obj = predicted_df.iloc[i]['object']
+        guess = predicted_df.iloc[i]['tool_guess']
+        
+        # Check if this was a guess scenario: Primary is Unknown, Guess is valid
+        is_guess = False
+        if pd.isna(obj) or obj == '' or str(obj).lower() == 'nan' or str(obj).lower() == 'unknown' or str(obj).lower() == 'using unknown':
+            if not (pd.isna(guess) or guess == '' or str(guess).lower() == 'nan' or str(guess).lower() == 'unknown'):
+                is_guess = True
+        
+        if is_guess:
+            for idx in range(start_idx, min(end_idx, timeline_length)):
+                guess_made[idx] = True
+
+    # Now calculate metrics
+    # Denominator: Time where primary prediction was Unknown (we can infer this: if guess_made is True, it was Unknown. 
+    # But what if it was Unknown and NO guess was made? We need to track that too.)
+    
+    # Let's simplify:
+    # Guess Rate = (Time with Guess) / (Time with Unknown Primary)
+    # Guess Accuracy = (Time with Correct Guess) / (Time with Guess)
+    
+    time_unknown_primary = 0
+    time_with_guess = 0
+    time_correct_guess = 0
+    
+    for i in range(len(predicted_df)):
+        start_time = predicted_df.iloc[i]['timestamp']
+        end_time = predicted_df.iloc[i+1]['timestamp'] if i+1 < len(predicted_df) else total_duration
+        duration = end_time - start_time
+        
+        obj = predicted_df.iloc[i]['object']
+        guess = predicted_df.iloc[i]['tool_guess']
+        
+        is_unknown_primary = False
+        if pd.isna(obj) or obj == '' or str(obj).lower() == 'nan' or str(obj).lower() == 'unknown' or str(obj).lower() == 'using unknown':
+            is_unknown_primary = True
+            
+        has_guess = False
+        if not (pd.isna(guess) or guess == '' or str(guess).lower() == 'nan' or str(guess).lower() == 'unknown'):
+            has_guess = True
+            
+        if is_unknown_primary:
+            time_unknown_primary += duration
+            if has_guess:
+                time_with_guess += duration
+                
+                # Check correctness (need to check against GT timeline for this duration)
+                # This is tricky because GT changes during this segment.
+                # We should use the timeline arrays.
+                pass
+
+    # Timeline based calculation for correctness
+    count_unknown_primary = 0
+    count_with_guess = 0
+    count_correct_guess = 0
+    
+    for idx in range(timeline_length):
+        # Re-evaluate "Unknown Primary" at this timestep? 
+        # We didn't store it. 
+        # Let's assume if guess_made[idx] is True, then it was Unknown Primary.
+        # But we miss the "Unknown Primary but NO guess" case.
+        
+        # To properly do this without massive refactor, let's just look at the "guess_made" slots.
+        # If we made a guess, was it right?
+        if guess_made[idx]:
+            count_with_guess += 1
+            if pred_object[idx] == gt_object[idx]: # pred_object is already the "effective" object (the guess)
+                count_correct_guess += 1
+                
+    guess_accuracy = count_correct_guess / count_with_guess if count_with_guess > 0 else None
     
     return {
         'state_accuracy': state_correct / timeline_length,
         'object_accuracy': object_accuracy,
+        'guess_accuracy': guess_accuracy,
         'using_tool_time': len(using_tool_indices) * resolution,
-        'total_time': total_duration
+        'total_time': total_duration,
+        'guess_time': count_with_guess * resolution
     }
 
 def generate_accuracy_charts(results_df, output_dir):
@@ -394,23 +581,42 @@ def run_benchmark(videos_to_process, batch_name, model_version, notes="", model_
             results = calculate_overlap(modeldata, testdata, video_id=video_id, total_duration=total_duration)
             all_results[video_name] = results
             
+            # Load performance stats from metadata if available
+            perf_stats = {}
+            try:
+                import json
+                metadata_path = os.path.join(model_data_dir, f"{video_name}_metadata.json")
+                if os.path.exists(metadata_path):
+                    with open(metadata_path, 'r') as f:
+                        meta = json.load(f)
+                        if 'performance' in meta:
+                            perf_stats = meta['performance']
+            except Exception as e:
+                print(f"  ⚠ Could not load metadata for {video_name}: {e}")
+
             results_records.append({
                 'run_id': run_id,
                 'timestamp': run_timestamp,
                 'batch_name': batch_name,
                 'model_version': model_version,
-                'batch_id': batch_id if batch_id else 'N/A',  # Add batch_id
+                'batch_id': batch_id if batch_id else 'N/A',
                 'video_name': video_name,
                 'video_id': video_id,
                 'state_accuracy': results['state_accuracy'],
                 'object_accuracy': results['object_accuracy'] if results['object_accuracy'] is not None else None,
+                'guess_accuracy': results['guess_accuracy'] if results['guess_accuracy'] is not None else None,
                 'using_tool_time': results['using_tool_time'],
+                'guess_time': results['guess_time'],
                 'total_time': results['total_time'],
+                'processing_time': perf_stats.get('total_time_seconds', meta.get('processing_time_seconds', None)),
+                'speed_ratio': perf_stats.get('speed_ratio', None),
+                'api_calls': perf_stats.get('api_calls_total', None),
                 'notes': notes
             })
             
             obj_str = f"{results['object_accuracy']:.2%}" if results['object_accuracy'] is not None else "N/A"
-            print(f"✓ {video_name}: state={results['state_accuracy']:.2%}, object={obj_str}")
+            guess_str = f"{results['guess_accuracy']:.2%}" if results['guess_accuracy'] is not None else "N/A"
+            print(f"✓ {video_name}: state={results['state_accuracy']:.2%}, object={obj_str}, guess={guess_str}")
         
         except Exception as e:
             print(f"✗ ERROR processing {video_name}: {e}")
@@ -436,6 +642,22 @@ def run_benchmark(videos_to_process, batch_name, model_version, notes="", model_
     else:
         avg_object_accuracy = None
         print("No 'using tool' overlap found for object comparison")
+        
+    guess_accuracies = [r['guess_accuracy'] for r in all_results.values() if r['guess_accuracy'] is not None]
+    if guess_accuracies:
+        avg_guess_accuracy = sum(guess_accuracies) / len(guess_accuracies)
+        print(f"Average guess accuracy: {avg_guess_accuracy:.2%}")
+    else:
+        avg_guess_accuracy = None
+        
+    # Performance Summary
+    total_processing_time = sum(r['processing_time'] for r in results_records if r['processing_time'] is not None)
+    total_api_calls = sum(r['api_calls'] for r in results_records if r['api_calls'] is not None)
+    avg_speed_ratio = sum(r['speed_ratio'] for r in results_records if r['speed_ratio'] is not None) / len(results_records) if results_records else 0
+    
+    print(f"Total Processing Time: {total_processing_time:.2f}s")
+    print(f"Average Speed Ratio: {avg_speed_ratio:.2f}x")
+    print(f"Total API Calls: {total_api_calls}")
     
     # Save outputs to per-run folder
     results_df = pd.DataFrame(results_records)
@@ -452,13 +674,17 @@ def run_benchmark(videos_to_process, batch_name, model_version, notes="", model_
     
     # Save summary statistics
     summary_data = {
-        'metric': ['average_state_accuracy', 'average_object_accuracy', 'videos_with_tool_overlap', 'total_videos', 'total_duration'],
+        'metric': ['average_state_accuracy', 'average_object_accuracy', 'average_guess_accuracy', 'videos_with_tool_overlap', 'total_videos', 'total_duration', 'total_processing_time', 'avg_speed_ratio', 'total_api_calls'],
         'value': [
             avg_state_accuracy,
             avg_object_accuracy if avg_object_accuracy is not None else 'N/A',
+            avg_guess_accuracy if avg_guess_accuracy is not None else 'N/A',
             len(object_accuracies) if object_accuracies else 0,
             len(all_results),
-            sum(r['total_time'] for r in all_results.values())
+            sum(r['total_time'] for r in all_results.values()),
+            total_processing_time,
+            avg_speed_ratio,
+            total_api_calls
         ]
     }
     summary_df = pd.DataFrame(summary_data)
@@ -471,7 +697,9 @@ def run_benchmark(videos_to_process, batch_name, model_version, notes="", model_
         'run_timestamp': [run_timestamp],
         'videos_processed': [', '.join(videos_with_gt)],
         'average_state_accuracy': [avg_state_accuracy],
-        'average_object_accuracy': [avg_object_accuracy if avg_object_accuracy is not None else 'N/A']
+        'average_object_accuracy': [avg_object_accuracy if avg_object_accuracy is not None else 'N/A'],
+        'average_guess_accuracy': [avg_guess_accuracy if avg_guess_accuracy is not None else 'N/A'],
+        'avg_speed_ratio': [avg_speed_ratio]
     }
     metadata_df = pd.DataFrame(metadata)
     metadata_path = os.path.join(RESULTS_DIR, "benchmark_metadata.csv")
@@ -487,6 +715,8 @@ def run_benchmark(videos_to_process, batch_name, model_version, notes="", model_
         'videos_processed': len(videos_with_gt),
         'avg_state_accuracy': avg_state_accuracy,
         'avg_object_accuracy': avg_object_accuracy if avg_object_accuracy is not None else None,
+        'avg_guess_accuracy': avg_guess_accuracy if avg_guess_accuracy is not None else None,
+        'avg_speed_ratio': avg_speed_ratio,
         'total_duration': sum(r['total_time'] for r in all_results.values()),
         'notes': notes
     }])

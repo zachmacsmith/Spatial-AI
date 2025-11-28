@@ -100,6 +100,7 @@ class StateCheckMethod(str, Enum):
     LLM_DIRECT = "llm_direct"
     HYBRID_MOTION_THEN_LLM = "hybrid_motion_then_llm"
     CV_OBJECTS_ONLY = "cv_objects_only"
+    LEGACY_TESTING_CLASS = "legacy_testing_class"
 
 
 class ObjectCheckMethod(str, Enum):
@@ -108,6 +109,7 @@ class ObjectCheckMethod(str, Enum):
     LLM_DIRECT = "llm_direct"
     CV_THEN_LLM = "cv_then_llm"
     LLM_WITH_CV_HINT = "llm_with_cv_hint"
+    LEGACY_TESTING_CLASS = "legacy_testing_class"
 
 
 class UnknownObjectCheckMethod(str, Enum):
@@ -115,6 +117,7 @@ class UnknownObjectCheckMethod(str, Enum):
     LLM_GUESS = "llm_guess"
     LLM_GUESS_WITH_OPTIONS = "llm_guess_with_options"
     CV_CLASS_NAME = "cv_class_name"
+    TEMPORAL_MAJORITY = "temporal_majority"
     SKIP = "skip"
 
 
@@ -370,7 +373,7 @@ class BatchParameters:
     def from_json(cls, filepath: str):
         """Load configuration from JSON file"""
         import json
-        from .enums import LLMProvider, CVModel, ToolDetectionMethod, ActionClassificationMethod, PromptTemplate, ProductivityAnalysisFormat, StorageBackend
+        # Enums are available in module scope
         with open(filepath, 'r') as f:
             data = json.load(f)
         # Convert string enums back to enum objects
@@ -570,6 +573,8 @@ PRESET_FULL = BatchParameters(
 PRESET_BASELINE = BatchParameters(
     batch_id="baseline",
     config_name="baseline",
+    llm_provider=LLMProvider.CLAUDE,
+    llm_model="claude-sonnet-4-5-20250929",
     prompting_protocol=PromptingProtocolType.SINGLE_SHOT,
     # Decision methods not used in single_shot
 )
@@ -578,6 +583,8 @@ PRESET_BASELINE = BatchParameters(
 PRESET_CHEAP = BatchParameters(
     batch_id="cheap",
     config_name="cheap",
+    llm_provider=LLMProvider.CLAUDE,
+    llm_model="claude-sonnet-4-5-20250929",
     prompting_protocol=PromptingProtocolType.CASCADE,
     state_check_method=StateCheckMethod.MOTION_THRESHOLD,
     object_check_method=ObjectCheckMethod.CV_DETECTION,
@@ -588,6 +595,8 @@ PRESET_CHEAP = BatchParameters(
 PRESET_BALANCED = BatchParameters(
     batch_id="balanced",
     config_name="balanced",
+    llm_provider=LLMProvider.CLAUDE,
+    llm_model="claude-sonnet-4-5-20250929",
     prompting_protocol=PromptingProtocolType.CASCADE,
     state_check_method=StateCheckMethod.HYBRID_MOTION_THEN_LLM,
     object_check_method=ObjectCheckMethod.CV_THEN_LLM,
@@ -598,6 +607,8 @@ PRESET_BALANCED = BatchParameters(
 PRESET_THOROUGH = BatchParameters(
     batch_id="thorough",
     config_name="thorough",
+    llm_provider=LLMProvider.CLAUDE,
+    llm_model="claude-sonnet-4-5-20250929",
     prompting_protocol=PromptingProtocolType.CASCADE,
     state_check_method=StateCheckMethod.LLM_DIRECT,
     object_check_method=ObjectCheckMethod.LLM_WITH_CV_HINT,

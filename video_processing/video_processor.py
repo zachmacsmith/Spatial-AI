@@ -32,6 +32,7 @@ from .utils.video_utils import (
     FrameLoader
 )
 from .utils.visualization import create_visualization
+from .utils.performance_tracker import PerformanceTracker
 from .output.output_manager import (
     save_actions_csv,
     save_relationships_csv,
@@ -182,6 +183,9 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
     Returns:
         Dict mapping output_type -> file_path
     """
+    # Initialize performance tracker
+    tracker = PerformanceTracker()
+    
     start_time = time.time()
     
     print(f"\n{'='*60}")
@@ -199,6 +203,7 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
     # ==========================================
     # 1. SETUP
     # ==========================================
+    tracker.start_section("setup")
     
     video_path = os.path.join(batch_params.video_directory, f"{video_name}.mp4")
     keyframes_folder = os.path.join(batch_params.keyframes_directory, f"keyframes{video_name}")
@@ -273,6 +278,8 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
     
     # Initialize relationship tracker if enabled
     relationship_tracker = None
+    # Initialize relationship tracker if enabled
+    relationship_tracker = None
     if batch_params.enable_relationship_tracking:
         relationship_tracker = RelationshipTracker(
             fps=video_props.fps,
@@ -280,10 +287,18 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
         )
         print("Relationship tracking enabled")
     
+    tracker.end_section("setup")
+    tracker.set_video_stats(video_props.duration, video_props.fps, actual_frame_count)
+    
     # ==========================================
     # 2. PRE-COMPUTE CONTEXT (The "See" Phase)
     # ==========================================
     
+    # ==========================================
+    # 2. PRE-COMPUTE CONTEXT (The "See" Phase)
+    # ==========================================
+    
+    tracker.start_section("precompute_context")
     _precompute_keyframe_contexts(
         keyframe_numbers,
         frame_cache,
@@ -293,6 +308,7 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
         video_props,
         relationship_tracker
     )
+    tracker.end_section("precompute_context")
     
     # ==========================================
     # 3. CLASSIFY & PROCESS (The "Think" & "Act" Phases)
@@ -307,6 +323,7 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
     
     print(f"\nPhase 2 & 3: Executing strategy '{batch_params.processing_strategy.value}'...")
     
+    tracker.start_section("classification")
     frame_labels = strategy(
         keyframe_numbers=keyframe_numbers,
         frame_count=actual_frame_count,
@@ -318,6 +335,10 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
         frame_cache=frame_cache,
         batch_params=batch_params
     )
+    tracker.end_section("classification")
+    
+    # Update API calls from batcher
+    tracker.increment_api_calls(api_batcher.total_requests)
     
     # ==========================================
     # 5. TEMPORAL SMOOTHING
@@ -325,11 +346,13 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
     
     if batch_params.enable_temporal_smoothing:
         print("\nApplying temporal smoothing...")
+        tracker.start_section("smoothing")
         frame_labels = apply_temporal_smoothing(
             frame_labels,
             batch_params.allowed_actions,
             batch_params.temporal_smoothing_window
         )
+        tracker.end_section("smoothing")
     
     # ==========================================
     # 6. GENERATE LABELED VIDEO (OPTIONAL)
@@ -339,6 +362,7 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
     
     if batch_params.generate_labeled_video:
         print("\nGenerating labeled video...")
+        tracker.start_section("video_generation")
         
         # Organize videos by batch ID
         batch_folder = Path(batch_params.video_output_directory) / batch_params.batch_id
@@ -445,6 +469,8 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
         # Finalize relationships
         if relationship_tracker:
             relationship_tracker.finalize(actual_frame_count)
+            
+        tracker.end_section("video_generation")
     
     # ==========================================
     # 7. SAVE OUTPUTS
@@ -484,6 +510,20 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
         processing_time,
         output_files
     )
+    
+    # Finalize tracker
+    tracker.end_time = time.time()
+    stats = tracker.get_stats()
+    
+    # Update metadata with full stats
+    save_batch_metadata(
+        video_name,
+        batch_params,
+        processing_time,
+        output_files,
+        performance_stats=stats
+    )
+    
     output_files['metadata'] = metadata_path
     
     # Print rate limiter stats if enabled
