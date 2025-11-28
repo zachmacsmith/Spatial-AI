@@ -99,9 +99,33 @@ def main():
         print("=" * 70)
         
         # Get batch metadata
-        batch_name = input(f"Batch name (default: {batch_id}): ").strip() or batch_id
-        model_version = input("Model version (default: gemini-2.0-flash-lite): ").strip() or "gemini-2.0-flash-lite"
-        notes = input("Notes (optional): ").strip()
+        # Get batch metadata
+        batch_name = batch_id
+        model_version = "unknown"
+        notes = ""
+        
+        # Try to load from batch tracking
+        try:
+            import json
+            tracking_path = Path("outputs/batch_tracking") / f"{batch_id}.json"
+            if tracking_path.exists():
+                with open(tracking_path, 'r') as f:
+                    config = json.load(f)
+                    if 'llm_model' in config:
+                        model_version = config['llm_model']
+                        print(f"✓ Detected model version: {model_version}")
+                    if 'config_description' in config:
+                        notes = config['config_description']
+            else:
+                print(f"⚠ No batch config found at {tracking_path}")
+        except Exception as e:
+            print(f"⚠ Error loading batch config: {e}")
+
+        print(f"Batch Name: {batch_name}")
+        print(f"Model Version: {model_version}")
+        if notes:
+            print(f"Notes: {notes}")
+
         
         # Run benchmark
         try:

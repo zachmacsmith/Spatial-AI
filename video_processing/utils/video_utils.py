@@ -9,6 +9,205 @@ import cv2
 import numpy as np
 from typing import List, Dict, Tuple, Optional
 from pathlib import Path
+from collections import OrderedDict
+from threading import Lock
+from typing import Iterator, Tuple, List, Dict, Optional
+
+
+
+class FrameLoader:
+    """
+    Lazy frame loader with LRU cache.
+    
+    Provides dict-like interface for backward compatibility.
+    Frames are 1-indexed to match existing codebase convention.
+    
+    Memory usage: O(max_frames) instead of O(total_frames)
+    
+    Thread-safe: Yes, uses Lock for cache operations.
+    
+    Usage:
+        loader = FrameLoader("video.mp4", max_frames=500)
+        frame = loader[100]      # dict-style access
+        frame = loader.get(100)  # .get() access
+        loader.close()           # Release video file
+    
+    Context manager usage:
+        with FrameLoader("video.mp4") as loader:
+            frame = loader[100]
+    """
+    
+    def __init__(self, video_path: str, max_frames: int = 500):
+        self.video_path = video_path
+        self.max_frames = max_frames
+        
+        # Open video file
+        self.cap = cv2.VideoCapture(video_path)
+        if not self.cap.isOpened():
+            raise ValueError(f"Cannot open video: {video_path}")
+        
+        # Extract properties
+        self.frame_count = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        self.fps = self.cap.get(cv2.CAP_PROP_FPS)
+        self.width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        self.height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        
+        # Initialize cache
+        self._cache: OrderedDict[int, np.ndarray] = OrderedDict()
+        self._lock = Lock()
+        
+        # Statistics
+        self.cache_hits = 0
+        self.cache_misses = 0
+        
+        # Track last accessed frame for sequential optimization
+        self._last_read_position = 0
+
+    def get(self, frame_number: int) -> Optional[np.ndarray]:
+        """
+        Get frame by number (1-indexed).
+        
+        Returns None if frame_number is out of bounds or read fails.
+        Thread-safe.
+        """
+        # Bounds check
+        if frame_number < 1 or frame_number > self.frame_count:
+            return None
+        
+        with self._lock:
+            # Cache hit
+            if frame_number in self._cache:
+                self.cache_hits += 1
+                self._cache.move_to_end(frame_number)  # Mark as recently used
+                return self._cache[frame_number]
+            
+            # Cache miss
+            self.cache_misses += 1
+            frame = self._load_frame(frame_number)
+            
+            if frame is not None:
+                self._cache[frame_number] = frame
+                self._cache.move_to_end(frame_number)
+                
+                # Evict oldest frames if over limit
+                while len(self._cache) > self.max_frames:
+                    self._cache.popitem(last=False)
+            
+            return frame
+
+    def _load_frame(self, frame_number: int) -> Optional[np.ndarray]:
+        """
+        Load single frame from video file.
+        
+        Internal method - caller must hold _lock.
+        Converts BGR to RGB to match existing codebase convention.
+        """
+        # OpenCV is 0-indexed, our API is 1-indexed
+        target_position = frame_number - 1
+        
+        # Seek to frame
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, target_position)
+        
+        # Read frame
+        ret, frame = self.cap.read()
+        
+        if not ret:
+            return None
+        
+        # Return BGR to match existing convention
+        return frame
+
+    def preload(self, frame_numbers: List[int]) -> None:
+        """
+        Preload specific frames into cache.
+        
+        Useful for preloading keyframes before processing.
+        Silently skips invalid frame numbers.
+        """
+        for fn in frame_numbers:
+            if 1 <= fn <= self.frame_count:
+                self.get(fn)  # Populates cache as side effect
+
+    def iter_frames(self, start: int = 1, end: Optional[int] = None) -> Iterator[Tuple[int, np.ndarray]]:
+        """
+        Iterate frames sequentially without caching.
+        
+        More efficient than random access for video generation.
+        Does NOT populate cache (to avoid evicting useful frames).
+        
+        Args:
+            start: First frame number (1-indexed, default 1)
+            end: Last frame number (1-indexed, default frame_count)
+        
+        Yields:
+            Tuple of (frame_number, frame_array)
+        
+        WARNING: Not thread-safe. Do not use concurrently with get().
+        """
+        if end is None:
+            end = self.frame_count
+        
+        # Seek to start position
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, start - 1)
+        
+        for fn in range(start, end + 1):
+            ret, frame = self.cap.read()
+            if not ret:
+                break
+            # Return BGR to match existing convention
+            yield fn, frame
+
+    def get_stats(self) -> Dict:
+        """Return cache performance statistics"""
+        total_accesses = self.cache_hits + self.cache_misses
+        hit_rate = self.cache_hits / total_accesses if total_accesses > 0 else 0.0
+        
+        return {
+            'cache_hits': self.cache_hits,
+            'cache_misses': self.cache_misses,
+            'hit_rate': hit_rate,
+            'current_cache_size': len(self._cache),
+            'max_cache_size': self.max_frames,
+            'total_frames': self.frame_count
+        }
+
+    def clear_cache(self) -> None:
+        """Clear frame cache, keep video file open"""
+        with self._lock:
+            self._cache.clear()
+            self.cache_hits = 0
+            self.cache_misses = 0
+
+    def close(self) -> None:
+        """Release video file and clear cache"""
+        with self._lock:
+            self._cache.clear()
+        self.cap.release()
+
+    def __enter__(self) -> 'FrameLoader':
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.close()
+
+    def __len__(self) -> int:
+        """Return total frame count (for len(loader))"""
+        return self.frame_count
+
+    def __getitem__(self, frame_number: int) -> np.ndarray:
+        """
+        Dict-style access: loader[frame_number]
+        
+        Raises KeyError if frame doesn't exist (matches dict behavior).
+        """
+        frame = self.get(frame_number)
+        if frame is None:
+            raise KeyError(f"Frame {frame_number} not found or could not be read")
+        return frame
+
+    def __contains__(self, frame_number: int) -> bool:
+        """Support 'frame_number in loader' syntax"""
+        return 1 <= frame_number <= self.frame_count
 
 
 class VideoProperties:
@@ -124,6 +323,12 @@ def get_frame_from_cache(frame_cache: Dict[int, np.ndarray], frame_number: int) 
     Raises:
         ValueError: If frame not in cache
     """
+    if hasattr(frame_cache, 'get'):
+        frame = frame_cache.get(frame_number)
+        if frame is None:
+            raise ValueError(f"Frame {frame_number} not in cache or could not be read")
+        return frame
+    
     if frame_number not in frame_cache:
         raise ValueError(f"Frame {frame_number} not in cache")
     return frame_cache[frame_number]
@@ -247,3 +452,95 @@ def create_video_writer(
     writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
     
     return writer
+
+
+def extract_keyframes(
+    video_path: str,
+    output_dir: str,
+    scale: float = 0.5,
+    min_gap: int = 20,
+    threshold_multiplier: float = 1.0
+) -> int:
+    """
+    Extract keyframes from video using adaptive thresholding.
+    
+    Args:
+        video_path: Path to video file
+        output_dir: Directory to save keyframes
+        scale: Resize factor for processing speed (default: 0.5)
+        min_gap: Minimum frames between keyframes (default: 20)
+        threshold_multiplier: Multiplier for adaptive threshold (default: 1.0)
+    
+    Returns:
+        Number of keyframes extracted
+    """
+    import os
+    import cv2
+    import numpy as np
+    
+    os.makedirs(output_dir, exist_ok=True)
+    
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise RuntimeError(f"Failed to open video: {video_path}")
+    
+    success, prev_frame = cap.read()
+    if not success:
+        cap.release()
+        raise RuntimeError(f"Failed to read first frame: {video_path}")
+    
+    # Initial processing
+    prev_frame_small = cv2.resize(prev_frame, (0, 0), fx=scale, fy=scale)
+    prev_gray = cv2.cvtColor(prev_frame_small, cv2.COLOR_BGR2GRAY)
+    
+    frame_index = 0
+    last_saved = -9999
+    diff_values = []
+    saved_count = 0
+    
+    # Always save first frame
+    cv2.imwrite(os.path.join(output_dir, "1.jpg"), prev_frame)
+    last_saved = 1
+    saved_count += 1
+    print(f"  Saved keyframe at frame 1")
+    
+    while True:
+        success, frame = cap.read()
+        if not success:
+            break
+        
+        # Use 1-based indexing to match load_all_frames
+        frame_index = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+        
+        # Resize for speed
+        frame_small = cv2.resize(frame, (0, 0), fx=scale, fy=scale)
+        frame_gray = cv2.cvtColor(frame_small, cv2.COLOR_BGR2GRAY)
+        
+        # Calculate difference
+        diff = cv2.absdiff(prev_gray, frame_gray)
+        diff_val = np.mean(diff)
+        diff_values.append(diff_val)
+        
+        # Adaptive threshold
+        if len(diff_values) > 5:
+            mean_val = np.mean(diff_values)
+            std_val = np.std(diff_values)
+            threshold = mean_val + threshold_multiplier * std_val
+        else:
+            threshold = diff_val * 2
+            
+        # Save keyframe if difference exceeds threshold and min_gap satisfied
+        if diff_val > threshold and frame_index - last_saved > min_gap:
+            filename = os.path.join(output_dir, f"{frame_index}.jpg")
+            cv2.imwrite(filename, frame)
+            last_saved = frame_index
+            saved_count += 1
+            if saved_count % 10 == 0:
+                print(f"  Saved keyframe at frame {frame_index}")
+        
+        prev_gray = frame_gray
+    
+    cap.release()
+    print(f"  Extracted {saved_count} keyframes to {output_dir}")
+    return saved_count
+

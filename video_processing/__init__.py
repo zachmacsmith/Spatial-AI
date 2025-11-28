@@ -11,6 +11,9 @@ from .batch_parameters import (
     ActionClassificationMethod,
     PromptTemplate,
     ProductivityAnalysisFormat,
+    StorageBackend,
+    ContextStrategy,
+    ProcessingStrategy,
     PRESET_BASIC,
     PRESET_OBJECTS,
     PRESET_RELATIONSHIPS,
@@ -29,5 +32,7 @@ __all__ = [
     'PRESET_OBJECTS',
     'PRESET_RELATIONSHIPS',
     'PRESET_HTML_ANALYSIS',
-    'StorageBackend'
+    'StorageBackend',
+    'ContextStrategy',
+    'ProcessingStrategy'
 ]

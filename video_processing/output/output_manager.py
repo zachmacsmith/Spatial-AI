@@ -5,16 +5,19 @@ Handles saving all output files (CSVs) with proper batch tracking metadata.
 """
 
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, TYPE_CHECKING
 import csv
+
+if TYPE_CHECKING:
+    from ..context import ContextStore
 
 
 def save_actions_csv(
     video_name: str,
-    frame_labels: List[str],
     fps: float,
     frame_count: int,
     batch_params,
+    context_store: 'ContextStore',
     output_path: Optional[str] = None
 ) -> str:
     """
@@ -23,15 +26,15 @@ def save_actions_csv(
     Outputs are organized in batch-specific folders to prevent overwrites.
     
     Format:
-    - Line 1: fps,total_duration,batch_id
-    - Subsequent lines: frame_number,action_label (only when action changes)
+    - Line 1: fps,total_duration,batch_id,protocol,state_method,object_method
+    - Subsequent lines: frame_number,action,tool,tool_guess
     
     Args:
         video_name: Name of video
-        frame_labels: List of action labels (one per frame)
         fps: Frames per second
         frame_count: Total number of frames
         batch_params: BatchParameters instance
+        context_store: ContextStore containing classification results
         output_path: Optional custom output path
     
     Returns:
@@ -52,21 +55,54 @@ def save_actions_csv(
     with open(output_path, 'w', newline='') as f:
         writer = csv.writer(f)
         
-        # Header line with batch tracking
+        # Header line with batch tracking and protocol info
+        header = ['fps', 'total_duration']
         if batch_params.track_model_versions:
-            writer.writerow([fps, total_duration, batch_params.batch_id])
-        else:
-            writer.writerow([fps, total_duration])
+            header.append('batch_id')
         
-        # Write state changes only
-        if frame_count > 0:
-            current_label = frame_labels[0]
-            writer.writerow([1, current_label])
+        # Add protocol metadata
+        header.extend(['protocol', 'state_method', 'object_method'])
+        
+        writer.writerow(header)
+        
+        row_data = [fps, total_duration]
+        if batch_params.track_model_versions:
+            row_data.append(batch_params.batch_id)
             
-            for i in range(1, frame_count):
-                if frame_labels[i] != current_label:
-                    current_label = frame_labels[i]
-                    writer.writerow([i + 1, current_label])
+        # Add protocol metadata values
+        row_data.extend([
+            batch_params.prompting_protocol.value,
+            batch_params.state_check_method.value,
+            batch_params.object_check_method.value
+        ])
+        
+        writer.writerow(row_data)
+        
+        # Column headers for data
+        writer.writerow(['frame', 'action', 'tool', 'tool_guess'])
+        
+        # Write transitions (state changes)
+        if frame_count > 0:
+            # Always write first frame
+            ctx = context_store.get(1)
+            current_action = ctx.action if ctx else "idle"
+            current_tool = ctx.tool if ctx else ""
+            current_guess = ctx.tool_guess if ctx else ""
+            
+            writer.writerow([1, current_action, current_tool, current_guess])
+            
+            for i in range(2, frame_count + 1):
+                ctx = context_store.get(i)
+                action = ctx.action if ctx else "idle"
+                tool = ctx.tool if ctx else ""
+                guess = ctx.tool_guess if ctx else ""
+                
+                # Check for change in ANY field
+                if action != current_action or tool != current_tool:
+                    current_action = action
+                    current_tool = tool
+                    current_guess = guess
+                    writer.writerow([i, current_action, current_tool, current_guess])
     
     return str(output_path)
 

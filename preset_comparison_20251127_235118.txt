@@ -1,0 +1,21 @@
+PRESET COMPARISON RESULTS
+======================================================================
+
+Date: 2025-11-27 23:51:18
+Duration: 835.3s
+
+
+Preset: relationships_gemini
+Video: video_14
+Status: success
+Batch ID: batch_20251127_233723_707345b4
+
+Preset: relationships_gemini_alt_weights
+Video: video_14
+Status: success
+Batch ID: batch_20251127_234053_a3b33f51
+
+Preset: relationships_gemini_flash
+Video: video_14
+Status: success
+Batch ID: batch_20251127_234450_9c082850

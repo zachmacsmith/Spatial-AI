@@ -1,0 +1,21 @@
+PRESET COMPARISON RESULTS
+======================================================================
+
+Date: 2025-11-28 00:14:25
+Duration: 670.9s
+
+
+Preset: relationships_anthropic
+Video: video_14
+Status: success
+Batch ID: batch_20251128_000314_394cc07b
+
+Preset: relationships_anthropic_alt_weights
+Video: video_14
+Status: success
+Batch ID: batch_20251128_000730_6cb96b5d
+
+Preset: relationships_anthropic_haiku
+Video: video_14
+Status: success
+Batch ID: batch_20251128_001134_4f17b6a4

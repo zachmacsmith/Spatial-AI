@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
+import numpy as np
 
 # Import all services and utilities
 from .ai.llm_service import get_llm_service
@@ -26,7 +27,9 @@ from .utils.video_utils import (
     sample_interval_frames,
     calculate_motion_score,
     load_keyframe_numbers,
-    create_video_writer
+    create_video_writer,
+    extract_keyframes,
+    FrameLoader
 )
 from .utils.visualization import create_visualization
 from .output.output_manager import (
@@ -34,6 +37,7 @@ from .output.output_manager import (
     save_relationships_csv,
     save_batch_metadata
 )
+from .processing_strategies import get_processing_strategy
 
 
 class RateLimiter:
@@ -89,17 +93,87 @@ class RateLimiter:
         }
 
 
+def _precompute_keyframe_contexts(
+    keyframe_numbers: List[int],
+    frame_cache: Dict[int, np.ndarray],
+    context_store: "ContextStore",
+    cv_service,
+    batch_params,
+    video_props,
+    relationship_tracker=None
+) -> None:
+    """
+    Pre-compute and store context for all keyframes.
+    Must run before classification so strategies can query history.
+    """
+    from .context import FrameContext, Detection
+    
+    print(f"\nPhase 1: Pre-computing context for {len(keyframe_numbers)} keyframes...")
+    
+    actual_frame_count = len(frame_cache)
+    
+    for kf_number in keyframe_numbers:
+        frame = get_frame_from_cache(frame_cache, kf_number)
+        
+        # Run YOLO
+        detections = []
+        relationships = []
+        raw_results = None
+        
+        if cv_service:
+            # Get full results object for caching
+            raw_results = cv_service.get_results_object(frame, batch_params.cv_confidence_threshold)
+            
+            # Extract detections for context
+            if raw_results:
+                for box, cls_id, conf in zip(
+                    raw_results.boxes.xyxy,
+                    raw_results.boxes.cls,
+                    raw_results.boxes.conf
+                ):
+                    class_name = raw_results.names[int(cls_id)]
+                    box_tuple = tuple(map(int, box.cpu().numpy()))
+                    detections.append(Detection(class_name, float(conf), box_tuple))
+        
+        # Compute relationships (lightweight snapshot for context)
+        if detections:
+            # Simple proximity check for context building
+            if relationship_tracker:
+                 det_tuples = [(d.bbox, d.class_name, d.confidence) for d in detections]
+                 rel_sets, _ = relationship_tracker.find_relationships(
+                    det_tuples, video_props.width, kf_number
+                 )
+                 relationships = rel_sets
+        
+        # Add to context store
+        ctx = FrameContext(
+            frame_number=kf_number,
+            timestamp=kf_number / video_props.fps,
+            detections=detections,
+            motion_score=None,  # Will be computed during interval processing
+            relationships=relationships,
+            raw_results=raw_results # Cache for video generation
+        )
+        context_store.add(ctx)
+        
+        if kf_number % 50 == 0:
+            print(f"  Pre-computed {kf_number}/{actual_frame_count} frames")
+            
+    print("✓ Context pre-computation complete")
+
+
 def process_video(video_name: str, batch_params) -> Dict[str, str]:
     """
     Main video processing function.
     
     This orchestrates the entire pipeline:
     1. Load video and frames
-    2. Process keyframes (action classification)
-    3. Process intervals between keyframes
-    4. Apply temporal smoothing
-    5. Generate labeled video (optional)
-    6. Save outputs (CSVs, metadata)
+    2. Pre-compute context (CV + Relationships) for ALL keyframes
+    3. Classify keyframes using rich context
+    4. Process intervals using context
+    5. Apply temporal smoothing
+    6. Generate labeled video (optional)
+    7. Save outputs (CSVs, metadata)
     
     Args:
         video_name: Name of video (without .mp4 extension)
@@ -114,6 +188,8 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
     print(f"Processing: {video_name}")
     print(f"Batch ID: {batch_params.batch_id}")
     print(f"Config: {batch_params.config_name}")
+    print(f"Context Strategy: {batch_params.context_strategy.value}")
+    print(f"Processing Strategy: {batch_params.processing_strategy.value}")
     print(f"{'='*60}\n")
     
     # Save batch configuration
@@ -133,17 +209,37 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
           f"{video_props.frame_count} frames, {video_props.duration:.2f}s")
     
     # Load keyframe numbers
-    keyframe_numbers = load_keyframe_numbers(keyframes_folder)
+    try:
+        keyframe_numbers = load_keyframe_numbers(keyframes_folder)
+        if not keyframe_numbers:
+            raise FileNotFoundError("No keyframes found")
+    except FileNotFoundError:
+        print(f"⚠ Keyframes not found in {keyframes_folder}")
+        print("  Generating keyframes automatically...")
+        extract_keyframes(video_path, keyframes_folder)
+        keyframe_numbers = load_keyframe_numbers(keyframes_folder)
+        
     print(f"Keyframes: {len(keyframe_numbers)}")
     
     # Pre-load all frames if enabled
+    # Load frames
     if batch_params.preload_all_frames:
-        print("Pre-loading all frames...")
+        # Legacy mode: load all frames into memory
+        # Use for short videos or systems with high RAM
+        print("Pre-loading all frames into memory...")
         frame_cache = load_all_frames(video_path)
-        print(f"Loaded {len(frame_cache)} frames into cache")
+        print(f"Loaded {len(frame_cache)} frames into memory")
     else:
-        # TODO: Implement on-demand frame loading
-        raise NotImplementedError("On-demand frame loading not yet implemented")
+        # Streaming mode: load on-demand with LRU cache
+        # Use for longer videos or limited RAM
+        print(f"Using streaming frame loader (cache size: {batch_params.frame_cache_size} frames)")
+        frame_cache = FrameLoader(video_path, max_frames=batch_params.frame_cache_size)
+        
+        # Preload keyframes for faster access during classification
+        if batch_params.preload_keyframes and keyframe_numbers:
+            print(f"Preloading {len(keyframe_numbers)} keyframes into cache...")
+            frame_cache.preload(keyframe_numbers)
+            print(f"Cache populated: {len(frame_cache._cache)}/{batch_params.frame_cache_size} frames")
     
     # Use actual loaded frame count (not reported metadata count)
     actual_frame_count = len(frame_cache)
@@ -154,6 +250,11 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
     # Initialize services
     llm_service = get_llm_service(batch_params)
     prompt_builder = PromptBuilder(batch_params)
+    
+    # Initialize Context components
+    from .context import ContextStore, get_context_builder, FrameContext, Detection
+    context_store = ContextStore(fps=video_props.fps, window_seconds=5.0)
+    context_builder = get_context_builder(batch_params.context_strategy.value)
     
     # Initialize rate limiter if enabled
     rate_limiter = None
@@ -180,219 +281,46 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
         print("Relationship tracking enabled")
     
     # ==========================================
-    # 2. PROCESS KEYFRAMES
+    # 2. PRE-COMPUTE CONTEXT (The "See" Phase)
     # ==========================================
     
-    print(f"\nProcessing {len(keyframe_numbers)} keyframes...")
-    
-    # Choose processing strategy: batch or sequential
-    if batch_params.enable_batch_processing:
-        # BATCH PROCESSING MODE (Efficient!)
-        from .api_request_batcher import create_api_request_batcher, APIBatchRequest
-        
-        api_batcher = create_api_request_batcher(batch_params)
-        
-        # Collect all keyframe requests
-        for kf_number in keyframe_numbers:
-            frame = get_frame_from_cache(frame_cache, kf_number)
-            
-            # Detect objects if enabled
-            detected_objects = None
-            if cv_service:
-                detections = cv_service.detect_objects(frame, batch_params.cv_confidence_threshold)
-                detected_objects = [(name, conf) for name, conf, box in detections]
-            
-            # Build prompt
-            prompt_text = prompt_builder.build_action_classification_prompt(
-                motion_score=None,
-                detected_objects=detected_objects
-            )
-            
-            # Add to batch
-            api_batcher.add_request(APIBatchRequest(
-                request_id=f"keyframe_{kf_number}",
-                frames=[frame],
-                prompt_text=prompt_text,
-                context={'detected_objects': detected_objects}
-            ))
-        
-        # Process all keyframes in batches
-        results = api_batcher.process_all(llm_service, prompt_builder)
-        
-        # Store results
-        for kf_number in keyframe_numbers:
-            label = results.get(f"keyframe_{kf_number}", "idle")
-            frame_labels[kf_number - 1] = label
-            print(f"Keyframe {kf_number}: {label}")
-    
-    else:
-        # SEQUENTIAL PROCESSING MODE (Original)
-        def process_keyframe(kf_number: int) -> tuple:
-            """Process single keyframe"""
-            # Apply rate limiting before API call
-            if rate_limiter:
-                rate_limiter.wait_if_needed()
-            
-            frame = get_frame_from_cache(frame_cache, kf_number)
-            
-            # Detect objects if enabled
-            detected_objects = None
-            if cv_service:
-                detections = cv_service.detect_objects(frame, batch_params.cv_confidence_threshold)
-                detected_objects = [(name, conf) for name, conf, box in detections]
-            
-            # Classify action
-            label = classify_action(
-                frames=[frame],
-                batch_params=batch_params,
-                llm_service=llm_service,
-                prompt_builder=prompt_builder,
-                motion_score=None,
-                detected_objects=detected_objects
-            )
-            
-            print(f"Keyframe {kf_number}: {label}")
-            return kf_number, label
-        
-        # Process keyframes in parallel
-        with ThreadPoolExecutor(max_workers=batch_params.max_workers_keyframes) as executor:
-            keyframe_results = list(executor.map(process_keyframe, keyframe_numbers))
-        
-        # Store keyframe results
-        for kf_number, label in keyframe_results:
-            frame_labels[kf_number - 1] = label
+    _precompute_keyframe_contexts(
+        keyframe_numbers,
+        frame_cache,
+        context_store,
+        cv_service,
+        batch_params,
+        video_props,
+        relationship_tracker
+    )
     
     # ==========================================
-    # 3. PROCESS INTERVALS
+    # 3. CLASSIFY & PROCESS (The "Think" & "Act" Phases)
     # ==========================================
     
-    print(f"\nProcessing {len(keyframe_numbers) - 1} intervals...")
+    # Initialize API batcher
+    from .api_request_batcher import create_api_request_batcher
+    api_batcher = create_api_request_batcher(batch_params)
     
-    # Choose processing strategy: batch or sequential
-    if batch_params.enable_batch_processing:
-        # BATCH PROCESSING MODE (Efficient!)
-        from .api_request_batcher import APIBatchRequest
-        
-        if 'api_batcher' not in locals():
-            from .api_request_batcher import create_api_request_batcher
-            api_batcher = create_api_request_batcher(batch_params)
-        else:
-            api_batcher.clear()  # Reuse processor, clear previous results
-        
-        # Collect all interval requests
-        for idx in range(len(keyframe_numbers) - 1):
-            start = keyframe_numbers[idx]
-            end = keyframe_numbers[idx + 1]
-            
-            # Sample frames from interval
-            frames_to_send = sample_interval_frames(
-                frame_cache, start, end, batch_params.num_frames_per_interval
-            )
-            
-            # Include neighbor frames if enabled
-            if batch_params.include_neighbor_frames:
-                if start > 1:
-                    frames_to_send.insert(0, get_frame_from_cache(frame_cache, max(1, start - 1)))
-                if end < video_props.frame_count:
-                    frames_to_send.append(get_frame_from_cache(frame_cache, min(video_props.frame_count, end + 1)))
-            
-            # Calculate motion score
-            motion = calculate_motion_score(frames_to_send, batch_params.motion_ignore_threshold)
-            
-            # Detect objects if enabled
-            detected_objects = None
-            if cv_service:
-                middle_frame = frames_to_send[len(frames_to_send) // 2]
-                detections = cv_service.detect_objects(middle_frame, batch_params.cv_confidence_threshold)
-                detected_objects = [(name, conf) for name, conf, box in detections]
-            
-            # Build prompt
-            prompt_text = prompt_builder.build_action_classification_prompt(
-                motion_score=motion,
-                detected_objects=detected_objects
-            )
-            
-            # Add to batch
-            api_batcher.add_request(APIBatchRequest(
-                request_id=f"interval_{start}_{end}",
-                frames=frames_to_send,
-                prompt_text=prompt_text,
-                context={'motion': motion, 'detected_objects': detected_objects}
-            ))
-        
-        # Process all intervals in batches
-        results = api_batcher.process_all(llm_service, prompt_builder)
-        
-        # Fill in interval labels
-        for idx in range(len(keyframe_numbers) - 1):
-            start = keyframe_numbers[idx]
-            end = keyframe_numbers[idx + 1]
-            label = results.get(f"interval_{start}_{end}", "idle")
-            for f in range(start, end):
-                frame_labels[f] = label
+    # Dispatch to selected strategy
+    strategy = get_processing_strategy(batch_params.processing_strategy.value)
     
-    else:
-        # SEQUENTIAL PROCESSING MODE (Original)
-        def process_interval(idx: int) -> tuple:
-            """Process interval between keyframes"""
-            # Apply rate limiting before API call
-            if rate_limiter:
-                rate_limiter.wait_if_needed()
-            
-            start = keyframe_numbers[idx]
-            end = keyframe_numbers[idx + 1]
-            
-            # Sample frames from interval
-            frames_to_send = sample_interval_frames(
-                frame_cache, start, end, batch_params.num_frames_per_interval
-            )
-            
-            # Include neighbor frames if enabled
-            if batch_params.include_neighbor_frames:
-                if start > 1:
-                    frames_to_send.insert(0, get_frame_from_cache(frame_cache, max(1, start - 1)))
-                if end < video_props.frame_count:
-                    frames_to_send.append(get_frame_from_cache(frame_cache, min(video_props.frame_count, end + 1)))
-            
-            # Calculate motion score
-            motion = calculate_motion_score(frames_to_send, batch_params.motion_ignore_threshold)
-            
-            # Detect objects if enabled
-            detected_objects = None
-            if cv_service:
-                # Get objects from middle frame
-                middle_frame = frames_to_send[len(frames_to_send) // 2]
-                detections = cv_service.detect_objects(middle_frame, batch_params.cv_confidence_threshold)
-                detected_objects = [(name, conf) for name, conf, box in detections]
-            
-            # Classify action
-            label = classify_action(
-                frames=frames_to_send,
-                batch_params=batch_params,
-                llm_service=llm_service,
-                prompt_builder=prompt_builder,
-                motion_score=motion,
-                detected_objects=detected_objects
-            )
-            
-            return start, end, label
-        
-        # Process intervals in parallel
-        with ThreadPoolExecutor(max_workers=batch_params.max_workers_intervals) as executor:
-            interval_results = list(executor.map(process_interval, range(len(keyframe_numbers) - 1)))
-        
-        # Fill in interval labels
-        for start, end, label in interval_results:
-            for f in range(start, end):
-                frame_labels[f] = label
+    print(f"\nPhase 2 & 3: Executing strategy '{batch_params.processing_strategy.value}'...")
     
-    # Fill after last keyframe
-    last_kf = keyframe_numbers[-1]
-    for f in range(last_kf, actual_frame_count):
-        frame_labels[f] = frame_labels[last_kf - 1]
+    frame_labels = strategy(
+        keyframe_numbers=keyframe_numbers,
+        frame_count=actual_frame_count,
+        context_store=context_store,
+        context_builder=context_builder,
+        api_batcher=api_batcher,
+        llm_service=llm_service,
+        prompt_builder=prompt_builder,
+        frame_cache=frame_cache,
+        batch_params=batch_params
+    )
     
     # ==========================================
-    # 4. TEMPORAL SMOOTHING
+    # 5. TEMPORAL SMOOTHING
     # ==========================================
     
     if batch_params.enable_temporal_smoothing:
@@ -404,7 +332,7 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
         )
     
     # ==========================================
-    # 5. GENERATE LABELED VIDEO (OPTIONAL)
+    # 6. GENERATE LABELED VIDEO (OPTIONAL)
     # ==========================================
     
     output_files = {}
@@ -412,7 +340,7 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
     if batch_params.generate_labeled_video:
         print("\nGenerating labeled video...")
         
-        # Organize videos by batch ID to prevent overwrites
+        # Organize videos by batch ID
         batch_folder = Path(batch_params.video_output_directory) / batch_params.batch_id
         batch_folder.mkdir(parents=True, exist_ok=True)
         video_output_path = batch_folder / f"{video_name}.mp4"
@@ -426,60 +354,84 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
             batch_params.video_codec
         )
         
-        latest_yolo_results = None
-        latest_detections = []
-        current_tool = None
+        current_yolo_results = None
+        current_relationships = []
         
-        for i in range(actual_frame_count):
-            frame = get_frame_from_cache(frame_cache, i + 1)
+        # Reset relationship tracker for full fidelity tracking
+        if relationship_tracker:
+            relationship_tracker = RelationshipTracker(
+                fps=video_props.fps,
+                proximity_threshold_percent=batch_params.proximity_threshold_percent
+            )
+        
+        # Choose iteration method based on frame_cache type
+        if hasattr(frame_cache, 'iter_frames'):
+            # Streaming mode: use efficient sequential iteration
+            frame_iterator = frame_cache.iter_frames(1, actual_frame_count)
+        else:
+            # Legacy mode: iterate over dict
+            frame_iterator = ((i + 1, get_frame_from_cache(frame_cache, i + 1)) for i in range(actual_frame_count))
+
+        for frame_num, frame in frame_iterator:
+            i = frame_num - 1  # Convert to 0-indexed for compatibility
             
-            # Run CV detection every N frames
-            if cv_service and i % batch_params.cv_detection_frequency == 0:
-                latest_yolo_results = cv_service.get_results_object(
-                    frame, batch_params.cv_confidence_threshold
-                )
-                
-                # Extract detections for relationship tracking
-                if latest_yolo_results:
-                    latest_detections = []
-                    for box, cls_id, conf in zip(
-                        latest_yolo_results.boxes.xyxy,
-                        latest_yolo_results.boxes.cls,
-                        latest_yolo_results.boxes.conf
-                    ):
-                        class_name = latest_yolo_results.names[int(cls_id)]
-                        box_tuple = tuple(map(int, box.cpu().numpy()))
-                        latest_detections.append((box_tuple, class_name, float(conf)))
-                    
-                    # Detect tool if enabled
-                    if batch_params.enable_tool_detection:
-                        detected_objects = [(name, conf) for box, name, conf in latest_detections]
-                        current_tool = detect_tool(
-                            frames=[frame],
-                            batch_params=batch_params,
-                            llm_service=llm_service,
-                            prompt_builder=prompt_builder,
-                            detected_objects=detected_objects
-                        )
+            # Check if we have cached results for this frame (it was a keyframe)
+            ctx = context_store.get(frame_num)
+            if ctx and ctx.raw_results:
+                current_yolo_results = ctx.raw_results
+            elif cv_service and i % batch_params.cv_detection_frequency == 0:
+                # Run YOLO periodically if not a keyframe
+                current_yolo_results = cv_service.get_results_object(frame, batch_params.cv_confidence_threshold)
             
-            # Track relationships if enabled
+            # Track relationships (full fidelity for video)
             line_info = []
-            if relationship_tracker and latest_detections:
+            if relationship_tracker and current_yolo_results:
+                # Extract detections from current results
+                detections = []
+                for box, cls_id, conf in zip(
+                    current_yolo_results.boxes.xyxy,
+                    current_yolo_results.boxes.cls,
+                    current_yolo_results.boxes.conf
+                ):
+                    class_name = current_yolo_results.names[int(cls_id)]
+                    box_tuple = tuple(map(int, box.cpu().numpy()))
+                    detections.append((box_tuple, class_name, float(conf)))
+                
                 relationships, line_info = relationship_tracker.find_relationships(
-                    latest_detections, video_props.width, i + 1
+                    detections, video_props.width, frame_num
                 )
-                relationship_tracker.update(relationships, i + 1)
+                relationship_tracker.update(relationships, frame_num)
             
-            # Prepare action label
-            action_label = frame_labels[i]
-            if action_label == "using tool" and current_tool:
-                action_label = f"using {current_tool}"
-            
+            # Refine "using tool" label with detected object
+            display_label = frame_labels[i]
+            if display_label == "using tool":
+                tool_name = "unknown"
+                if current_yolo_results:
+                    # Filter out non-tool objects
+                    ignored_objects = {"person", "hand", "hardhat", "safety vest", "glove", "helmet", "vest", "face"}
+                    detected_tools = []
+                    
+                    if hasattr(current_yolo_results, 'boxes'):
+                        for cls_id, conf in zip(current_yolo_results.boxes.cls, current_yolo_results.boxes.conf):
+                            name = current_yolo_results.names[int(cls_id)]
+                            if name not in ignored_objects:
+                                detected_tools.append((name, float(conf)))
+                    
+                    if detected_tools:
+                        # Sort by confidence
+                        detected_tools.sort(key=lambda x: x[1], reverse=True)
+                        tool_name = detected_tools[0][0]
+                        display_label = f"using + {tool_name}"
+                    else:
+                        display_label = "using unknown"
+                else:
+                    display_label = "using unknown"
+
             # Create visualization
             frame_with_viz = create_visualization(
                 frame=frame,
-                action_label=action_label,
-                yolo_results=latest_yolo_results,
+                action_label=display_label,
+                yolo_results=current_yolo_results,
                 relationship_lines=line_info,
                 batch_params=batch_params
             )
@@ -495,7 +447,7 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
             relationship_tracker.finalize(actual_frame_count)
     
     # ==========================================
-    # 6. SAVE OUTPUTS
+    # 7. SAVE OUTPUTS
     # ==========================================
     
     print("\nSaving outputs...")
@@ -503,11 +455,12 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
     # Save actions CSV
     if batch_params.save_actions_csv:
         actions_csv_path = save_actions_csv(
-            video_name,
-            frame_labels,
-            video_props.fps,
-            actual_frame_count,
-            batch_params
+            video_name=video_name,
+            fps=video_props.fps,
+            frame_count=actual_frame_count,
+            batch_params=batch_params,
+            context_store=context_store,
+            output_path=None
         )
         output_files['actions_csv'] = actions_csv_path
         print(f"Saved actions CSV: {actions_csv_path}")
@@ -522,7 +475,6 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
         )
         output_files['relationships_csv'] = relationships_csv_path
         print(f"Saved relationships CSV: {relationships_csv_path}")
-        print(f"Total relationships: {len(relationship_tracker.get_relationships_csv_data())}")
     
     # Save batch metadata
     processing_time = time.time() - start_time
@@ -549,4 +501,14 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
     print(f"Batch ID: {batch_params.batch_id}")
     print(f"{'='*60}\n")
     
+    # Cleanup frame loader if streaming mode
+    if hasattr(frame_cache, 'close'):
+        stats = frame_cache.get_stats()
+        print(f"\nFrame cache statistics:")
+        print(f"  Cache hits: {stats['cache_hits']}")
+        print(f"  Cache misses: {stats['cache_misses']}")
+        print(f"  Hit rate: {stats['hit_rate']:.1%}")
+        print(f"  Peak cache size: {stats['current_cache_size']}/{stats['max_cache_size']}")
+        frame_cache.close()
+
     return output_files

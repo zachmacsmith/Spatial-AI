@@ -1,0 +1,11 @@
+PRESET COMPARISON RESULTS
+======================================================================
+
+Date: 2025-11-28 00:19:39
+Duration: 215.6s
+
+
+Preset: relationships_anthropic_haiku
+Video: video_14
+Status: success
+Batch ID: batch_20251128_001603_80adc1c4

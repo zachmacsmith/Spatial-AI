@@ -367,6 +367,26 @@ python -c "from video_processing import process_video, PRESET_BASIC; process_vid
 
 ---
 
+## Supported Objects
+
+The system's YOLO model (`weights.pt`) is trained to detect the following 11 classes:
+
+| Class ID | Object Name |
+|----------|-------------|
+| 0 | brick |
+| 1 | brick trowel |
+| 2 | caulk gun |
+| 3 | drill |
+| 4 | hand |
+| 5 | hardhat |
+| 6 | pencil |
+| 7 | person |
+| 8 | safety vest |
+| 9 | saw |
+| 10 | tape |
+
+---
+
 ## Support
 
 For questions or issues, check:

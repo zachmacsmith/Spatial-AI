@@ -72,6 +72,52 @@ class StorageBackend(str, Enum):
     S3 = "s3"
 
 
+class ContextStrategy(str, Enum):
+    """Strategy for building prompt context"""
+    MINIMAL = "minimal"
+    STANDARD = "standard"
+    TEMPORAL = "temporal"
+    FULL = "full"
+
+
+class ProcessingStrategy(str, Enum):
+    """Strategy for processing video frames"""
+    CLASSIFY_ALL = "classify_all"
+    KEYFRAMES_ONLY = "keyframes_only"
+    SMART = "smart"
+    KEYFRAMES_SAMPLED = "keyframes_sampled"
+
+
+class PromptingProtocolType(str, Enum):
+    """How to structure the classification query"""
+    SINGLE_SHOT = "single_shot"
+    CASCADE = "cascade"
+
+
+class StateCheckMethod(str, Enum):
+    """How to determine action state"""
+    MOTION_THRESHOLD = "motion_threshold"
+    LLM_DIRECT = "llm_direct"
+    HYBRID_MOTION_THEN_LLM = "hybrid_motion_then_llm"
+    CV_OBJECTS_ONLY = "cv_objects_only"
+
+
+class ObjectCheckMethod(str, Enum):
+    """How to identify tools"""
+    CV_DETECTION = "cv_detection"
+    LLM_DIRECT = "llm_direct"
+    CV_THEN_LLM = "cv_then_llm"
+    LLM_WITH_CV_HINT = "llm_with_cv_hint"
+
+
+class UnknownObjectCheckMethod(str, Enum):
+    """How to guess unknown tools"""
+    LLM_GUESS = "llm_guess"
+    LLM_GUESS_WITH_OPTIONS = "llm_guess_with_options"
+    CV_CLASS_NAME = "cv_class_name"
+    SKIP = "skip"
+
+
 # ==========================================
 # BATCH PARAMETERS
 # ==========================================
@@ -122,6 +168,15 @@ class BatchParameters:
     include_object_list: bool = True
     include_object_confidence: bool = True
     max_objects_in_prompt: int = 5
+    context_strategy: ContextStrategy = ContextStrategy.STANDARD
+    
+    # Prompting protocol configuration
+    prompting_protocol: PromptingProtocolType = PromptingProtocolType.SINGLE_SHOT
+    
+    # Decision function configuration (used when prompting_protocol=CASCADE)
+    state_check_method: StateCheckMethod = StateCheckMethod.LLM_DIRECT
+    object_check_method: ObjectCheckMethod = ObjectCheckMethod.CV_THEN_LLM
+    unknown_object_check_method: UnknownObjectCheckMethod = UnknownObjectCheckMethod.LLM_GUESS
     
     # ==========================================
     # 3. ANALYSIS METHODS
@@ -146,6 +201,12 @@ class BatchParameters:
     motion_score_threshold_idle: float = 0.16
     motion_ignore_threshold: int = 5
     
+    # Strategy parameters
+    processing_strategy: ProcessingStrategy = ProcessingStrategy.CLASSIFY_ALL
+    keyframe_sample_rate: int = 1  # For KEYFRAMES_SAMPLED strategy
+    smart_classification_motion_threshold: float = 0.15  # For SMART strategy
+    smart_classification_max_gap: int = 50  # Max frames between forced classifications
+    
     # ==========================================
     # 5. FEATURE TOGGLES
     # ==========================================
@@ -164,7 +225,7 @@ class BatchParameters:
     draw_bounding_boxes: bool = True
     draw_relationship_lines: bool = True
     draw_action_labels: bool = True
-    overlay_font_size: int = 96
+    overlay_font_size: int = 200
     save_actions_csv: bool = True
     save_relationships_csv: bool = True
     productivity_analysis_format: ProductivityAnalysisFormat = ProductivityAnalysisFormat.IMAGES
@@ -185,7 +246,11 @@ class BatchParameters:
     
     max_workers_keyframes: int = 8
     max_workers_intervals: int = 4
-    preload_all_frames: bool = True
+    
+    # Frame loading strategy
+    preload_all_frames: bool = False  # True: load all frames (high RAM). False: streaming with LRU cache
+    frame_cache_size: int = 500       # Max frames in LRU cache when preload_all_frames=False
+    preload_keyframes: bool = True    # Preload keyframes into cache for faster access
     
     # API Rate Limiting
     enable_rate_limiting: bool = True  # Enable API rate limiting
@@ -238,6 +303,8 @@ class BatchParameters:
     def __post_init__(self):
         """Auto-populate metadata and configure rate limits"""
         import uuid
+        import datetime
+        import json
         from pathlib import Path
         
         # Auto-configure rate limits if not manually set
@@ -253,8 +320,13 @@ class BatchParameters:
             unique_id = str(uuid.uuid4())[:8]
             self.batch_id = f"batch_{timestamp}_{unique_id}"
             
+        # Create batch tracking directory
+        Path(self.batch_tracking_directory).mkdir(parents=True, exist_ok=True)
+            
     def _configure_rate_limit(self):
         """Load rate limits from config file based on model and tier"""
+        import json
+        from pathlib import Path
         try:
             config_path = Path(__file__).parent / 'config' / 'google_model_limits.json'
             if config_path.exists():
@@ -274,8 +346,6 @@ class BatchParameters:
             print(f"⚠ Error loading rate limits: {e}")
             self.api_requests_per_minute = 10
         
-        # Create batch tracking directory
-        Path(self.batch_tracking_directory).mkdir(parents=True, exist_ok=True)
     
     def save_batch_config(self):
         """
@@ -290,6 +360,8 @@ class BatchParameters:
     
     def to_json(self, filepath: str):
         """Save configuration to JSON file"""
+        import json
+        from pathlib import Path
         Path(filepath).parent.mkdir(parents=True, exist_ok=True)
         with open(filepath, 'w') as f:
             json.dump(self.to_dict(), f, indent=2)
@@ -297,6 +369,8 @@ class BatchParameters:
     @classmethod
     def from_json(cls, filepath: str):
         """Load configuration from JSON file"""
+        import json
+        from .enums import LLMProvider, CVModel, ToolDetectionMethod, ActionClassificationMethod, PromptTemplate, ProductivityAnalysisFormat, StorageBackend
         with open(filepath, 'r') as f:
             data = json.load(f)
         # Convert string enums back to enum objects
@@ -314,6 +388,21 @@ class BatchParameters:
             data['productivity_analysis_format'] = ProductivityAnalysisFormat(data['productivity_analysis_format'])
         if 'storage_backend' in data and isinstance(data['storage_backend'], str):
             data['storage_backend'] = StorageBackend(data['storage_backend'])
+        if 'context_strategy' in data and isinstance(data['context_strategy'], str):
+            data['context_strategy'] = ContextStrategy(data['context_strategy'])
+        if 'processing_strategy' in data and isinstance(data['processing_strategy'], str):
+            data['processing_strategy'] = ProcessingStrategy(data['processing_strategy'])
+            
+        # Handle new Enums
+        if 'prompting_protocol' in data and isinstance(data['prompting_protocol'], str):
+            data['prompting_protocol'] = PromptingProtocolType(data['prompting_protocol'])
+        if 'state_check_method' in data and isinstance(data['state_check_method'], str):
+            data['state_check_method'] = StateCheckMethod(data['state_check_method'])
+        if 'object_check_method' in data and isinstance(data['object_check_method'], str):
+            data['object_check_method'] = ObjectCheckMethod(data['object_check_method'])
+        if 'unknown_object_check_method' in data and isinstance(data['unknown_object_check_method'], str):
+            data['unknown_object_check_method'] = UnknownObjectCheckMethod(data['unknown_object_check_method'])
+            
         return cls(**data)
     
     @classmethod
@@ -330,6 +419,8 @@ class BatchParameters:
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
+        from dataclasses import asdict
+        from typing import Dict, Any
         return asdict(self)
     
     def copy(self):
@@ -468,4 +559,47 @@ PRESET_FULL = BatchParameters(
     productivity_analysis_format=ProductivityAnalysisFormat.IMAGES,
     tool_detection_method=ToolDetectionMethod.CV_INFERENCE,
     action_classification_method=ActionClassificationMethod.LLM_MULTIFRAME
+)
+
+
+# ==========================================
+# NEW PRESET CONFIGURATIONS (DECISION SYSTEM)
+# ==========================================
+
+# Baseline: Current behavior
+PRESET_BASELINE = BatchParameters(
+    batch_id="baseline",
+    config_name="baseline",
+    prompting_protocol=PromptingProtocolType.SINGLE_SHOT,
+    # Decision methods not used in single_shot
+)
+
+# Cheap: Minimize API calls
+PRESET_CHEAP = BatchParameters(
+    batch_id="cheap",
+    config_name="cheap",
+    prompting_protocol=PromptingProtocolType.CASCADE,
+    state_check_method=StateCheckMethod.MOTION_THRESHOLD,
+    object_check_method=ObjectCheckMethod.CV_DETECTION,
+    unknown_object_check_method=UnknownObjectCheckMethod.CV_CLASS_NAME,
+)
+
+# Balanced: Hybrid approach
+PRESET_BALANCED = BatchParameters(
+    batch_id="balanced",
+    config_name="balanced",
+    prompting_protocol=PromptingProtocolType.CASCADE,
+    state_check_method=StateCheckMethod.HYBRID_MOTION_THEN_LLM,
+    object_check_method=ObjectCheckMethod.CV_THEN_LLM,
+    unknown_object_check_method=UnknownObjectCheckMethod.LLM_GUESS,
+)
+
+# Thorough: Maximum accuracy
+PRESET_THOROUGH = BatchParameters(
+    batch_id="thorough",
+    config_name="thorough",
+    prompting_protocol=PromptingProtocolType.CASCADE,
+    state_check_method=StateCheckMethod.LLM_DIRECT,
+    object_check_method=ObjectCheckMethod.LLM_WITH_CV_HINT,
+    unknown_object_check_method=UnknownObjectCheckMethod.LLM_GUESS_WITH_OPTIONS,
 )
