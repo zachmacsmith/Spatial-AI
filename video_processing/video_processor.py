@@ -16,8 +16,7 @@ import numpy as np
 # Import all services and utilities
 from .ai.llm_service import get_llm_service
 from .ai.cv_service import get_cv_service
-from .ai.prompt_builder import PromptBuilder
-from .analysis.action_classifier import classify_action, apply_temporal_smoothing
+from .ai.cv_service import get_cv_service
 from .analysis.tool_detector import detect_tool
 from .analysis.relationship_tracker import RelationshipTracker
 from .utils.video_utils import (
@@ -29,7 +28,9 @@ from .utils.video_utils import (
     load_keyframe_numbers,
     create_video_writer,
     extract_keyframes,
-    FrameLoader
+    extract_keyframes,
+    FrameLoader,
+    apply_temporal_smoothing
 )
 from .utils.visualization import create_visualization
 from .utils.performance_tracker import PerformanceTracker
@@ -254,7 +255,6 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
     
     # Initialize services
     llm_service = get_llm_service(batch_params)
-    prompt_builder = PromptBuilder(batch_params)
     
     # Initialize Context components
     from .context import ContextStore, get_context_builder, FrameContext, Detection
@@ -331,7 +331,6 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
         context_builder=context_builder,
         api_batcher=api_batcher,
         llm_service=llm_service,
-        prompt_builder=prompt_builder,
         frame_cache=frame_cache,
         batch_params=batch_params
     )

@@ -174,7 +174,6 @@ def strategy_classify_all(
     context_builder: ComposableContextBuilder,
     api_batcher: APIRequestBatcher,
     llm_service,
-    prompt_builder,
     frame_cache: Dict[int, np.ndarray],
     batch_params: BatchParameters
 ) -> List[str]:
@@ -286,7 +285,6 @@ def strategy_keyframes_only(
     context_builder: ComposableContextBuilder,
     api_batcher: APIRequestBatcher,
     llm_service,
-    prompt_builder,
     frame_cache: Dict[int, np.ndarray],
     batch_params: BatchParameters
 ) -> List[str]:
@@ -332,7 +330,6 @@ def strategy_smart(
     context_builder: ComposableContextBuilder,
     api_batcher: APIRequestBatcher,
     llm_service,
-    prompt_builder,
     frame_cache: Dict[int, np.ndarray],
     batch_params: BatchParameters
 ) -> List[str]:
@@ -401,7 +398,6 @@ def strategy_keyframes_sampled(
     context_builder: ComposableContextBuilder,
     api_batcher: APIRequestBatcher,
     llm_service,
-    prompt_builder,
     frame_cache: Dict[int, np.ndarray],
     batch_params: BatchParameters
 ) -> List[str]:

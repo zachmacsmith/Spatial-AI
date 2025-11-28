@@ -544,3 +544,43 @@ def extract_keyframes(
     print(f"  Extracted {saved_count} keyframes to {output_dir}")
     return saved_count
 
+
+def apply_temporal_smoothing(
+    frame_labels: List[str],
+    allowed_actions: List[str],
+    window_size: int = 9
+) -> List[str]:
+    """
+    Apply temporal smoothing to reduce jitter in classifications.
+    
+    For each frame, looks at surrounding frames and picks most common action.
+    
+    Args:
+        frame_labels: List of action labels (one per frame)
+        allowed_actions: List of allowed action names
+        window_size: Size of smoothing window
+    
+    Returns:
+        Smoothed list of action labels
+    """
+    frame_count = len(frame_labels)
+    smoothed_labels = frame_labels.copy()
+    
+    for i in range(frame_count):
+        start = max(0, i - window_size)
+        end = min(frame_count, i + window_size)
+        
+        # Count actions in window
+        counts = {action: 0 for action in allowed_actions}
+        for j in range(start, end):
+            label = frame_labels[j]
+            if label in counts:
+                counts[label] += 1
+        
+        # Pick most common
+        if sum(counts.values()) > 0:
+            smoothed_labels[i] = max(counts, key=counts.get)
+        else:
+            smoothed_labels[i] = allowed_actions[0]  # Fallback
+    
+    return smoothed_labels
