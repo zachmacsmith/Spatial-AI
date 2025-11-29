@@ -91,3 +91,117 @@
 1,0:10,using tool,saw,
 1,0:18,moving,,
 1,0:21,using tool,saw,
+17,0:00,moving,,
+17,0:04,using tool,hammer,
+17,0:12,using tool,unknown,screw
+17,0:15,using tool,hammer,
+17,0:22,using tool,unknown,screw
+17,0:27,moving,,
+17,0:29,idle,,
+17,0:32,moving,,
+17,0:36,using tool,hammer,
+17,0:42,using tool,unknown,screw
+17,0:45,using tool,unknown,wood
+17,0:59,using tool,unknown,ladder
+17,1:00,moving,,
+17,1:07,idle,,
+17,1:12,using tool,unknown,wood
+17,1:15,using tool,hammer,
+17,1:20,idle,,
+17,1:30,using tool,hammer,
+17,1:34,using tool,unknown,wood
+17,1:37,using tool,hammer,
+17,1:39,using tool,unknown,wood
+17,1:40,moving,,
+17,1:41,using tool,hammer,
+17,1:58,idle,,
+17,2:01,using tool,hammer,
+17,2:06,idle,,
+17,2:08,using tool,hammer,
+17,2:14,moving,,
+17,2:35,using tool,hammer,
+17,2:45,using tool,unknown,wood
+17,2:47,using tool,hammer,
+17,2:49,idle,,
+17,2:53,moving,,
+17,2:55,using tool,unknown,screw
+17,2:59,using tool,hammer,
+17,3:09,idle,,
+17,3:10,moving,,
+17,3:14,idle,,
+17,3:17,using tool,hammer,
+17,3:29,idle,,
+17,3:34,moving,,
+18,0:00,using tool,unknown,wood
+18,0:03,using tool,measuring,
+18,0:08,moving,,
+18,0:10,idle,,
+18,0:12,using tool,measuring,
+18,0:18,using tool,saw,
+18,0:24,moving,,
+18,0:25,using tool,saw,
+18,0:32,moving,,
+18,0:33,using tool,unknown,wood
+18,0:36,moving,,
+18,0:37,using tool,measuring,
+18,0:57,moving,,
+18,1:00,using tool,saw,
+18,1:09,moving,,
+18,1:12,using tool,saw,
+18,1:22,using tool,unknown,wood
+18,1:25,idle,,
+18,1:38,using tool,measuring,
+18,1:42,using tool,saw,
+18,1:47,moving,,
+18,1:49,using tool,measuring,
+18,1:52,moving,,
+18,1:54,using tool,measuring,
+18,2:08,moving,,
+18,2:11,using tool,measuring,
+18,2:17,moving,,
+18,2:23,using tool,saw,
+18,2:26,using tool,unknown,wood
+18,2:28,using tool,saw,
+18,2:39,using tool,unknown,wood
+18,2:50,moving,,
+18,2:54,using tool,saw,
+18,3:03,using tool,unknown,wood
+18,3:07,moving,,
+18,3:18,idle,,
+18,3:21,moving,,
+18,3:32,using tool,hammer,
+18,3:38,idle,,
+18,3:43,using tool,measuring,
+18,3:56,using tool,hammer,
+18,4:02,idle,,
+18,4:05,using tool,hammer,
+18,4:09,using tool,measuring,
+18,4:13,using tool,saw,
+18,4:17,idle,,
+18,4:22,using tool,measuring,
+18,4:28,idle,,
+18,4:34,moving,,
+18,4:36,using tool,hammer,
+18,4:45,idle,,
+18,4:48,using tool,hammer,
+18,5:02,using tool,unknown,nail gun
+18,5:07,idle,,
+18,5:31,using tool,unknown,wood
+18,5:37,using tool,measuring,
+18,5:41,idle,,
+18,5:42,using tool,unknown,wood
+19,0:00,using tool,unknown,wood
+19,0:04,using tool,unknown,nail gun
+19,0:06,idle,,
+19,0:08,using tool,unknown,wood
+19,0:11,using tool,measuring,
+19,0:19,idle,,
+19,0:23,using tool,measuring,
+19,0:28,idle,,
+19,0:31,using tool,saw,
+19,0:41,using tool,unknown,wood
+19,0:53,using tool,measuring,
+19,1:01,using tool,unknown,wood
+19,1:04,using tool,measuring,
+19,1:07,using tool,saw,
+19,1:15,using tool,unknown,wood

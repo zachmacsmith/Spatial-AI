@@ -211,7 +211,15 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
     tracker.start_section("setup")
     
     video_path = os.path.join(batch_params.video_directory, f"{video_name}.mp4")
-    keyframes_folder = os.path.join(batch_params.keyframes_directory, f"keyframes{video_name}")
+    
+    # Dynamic keyframe folder naming
+    # If using custom settings, append them to folder name to avoid conflicts
+    kf_folder_name = f"keyframes{video_name}"
+    if (batch_params.keyframe_min_gap != 20 or 
+        batch_params.keyframe_threshold_multiplier != 1.0):
+        kf_folder_name += f"_gap{batch_params.keyframe_min_gap}_thresh{batch_params.keyframe_threshold_multiplier}"
+        
+    keyframes_folder = os.path.join(batch_params.keyframes_directory, kf_folder_name)
     
     # Get video properties
     video_props = get_video_properties(video_path)
@@ -225,8 +233,13 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
             raise FileNotFoundError("No keyframes found")
     except FileNotFoundError:
         print(f"⚠ Keyframes not found in {keyframes_folder}")
-        print("  Generating keyframes automatically...")
-        extract_keyframes(video_path, keyframes_folder)
+        print(f"  Generating keyframes automatically (Gap: {batch_params.keyframe_min_gap}, Thresh: {batch_params.keyframe_threshold_multiplier})...")
+        extract_keyframes(
+            video_path, 
+            keyframes_folder,
+            min_gap=batch_params.keyframe_min_gap,
+            threshold_multiplier=batch_params.keyframe_threshold_multiplier
+        )
         keyframe_numbers = load_keyframe_numbers(keyframes_folder)
         
     print(f"Keyframes: {len(keyframe_numbers)}")
@@ -359,113 +372,10 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
         tracker.end_section("smoothing")
     
     # ==========================================
-    # 6. GENERATE LABELED VIDEO (OPTIONAL)
+    # 6. SAVE OUTPUTS (DATA FIRST)
     # ==========================================
     
     output_files = {}
-    
-    if batch_params.generate_labeled_video:
-        print("\nGenerating labeled video...")
-        tracker.start_section("video_generation")
-        
-        # Organize videos by batch ID
-        batch_folder = Path(batch_params.video_output_directory) / batch_params.batch_id
-        batch_folder.mkdir(parents=True, exist_ok=True)
-        video_output_path = batch_folder / f"{video_name}.mp4"
-        video_output_path = str(video_output_path)
-        
-        writer = create_video_writer(
-            video_output_path,
-            video_props.fps,
-            video_props.width,
-            video_props.height,
-            batch_params.video_codec
-        )
-        
-        current_yolo_results = None
-        current_relationships = []
-        
-        # Reset relationship tracker for full fidelity tracking
-        if relationship_tracker:
-            relationship_tracker = RelationshipTracker(
-                fps=video_props.fps,
-                proximity_threshold_percent=batch_params.proximity_threshold_percent
-            )
-        
-        # Choose iteration method based on frame_cache type
-        if hasattr(frame_cache, 'iter_frames'):
-            # Streaming mode: use efficient sequential iteration
-            frame_iterator = frame_cache.iter_frames(1, actual_frame_count)
-        else:
-            # Legacy mode: iterate over dict
-            frame_iterator = ((i + 1, get_frame_from_cache(frame_cache, i + 1)) for i in range(actual_frame_count))
-
-        for frame_num, frame in frame_iterator:
-            i = frame_num - 1  # Convert to 0-indexed for compatibility
-            
-            # Check if we have cached results for this frame (it was a keyframe)
-            ctx = context_store.get(frame_num)
-            if ctx and ctx.raw_results:
-                current_yolo_results = ctx.raw_results
-            elif cv_service and i % batch_params.cv_detection_frequency == 0:
-                # Run YOLO periodically if not a keyframe
-                current_yolo_results = cv_service.get_results_object(frame, batch_params.cv_confidence_threshold)
-            
-            # Track relationships (full fidelity for video)
-            line_info = []
-            if relationship_tracker and current_yolo_results:
-                # Extract detections from current results
-                detections = []
-                for box, cls_id, conf in zip(
-                    current_yolo_results.boxes.xyxy,
-                    current_yolo_results.boxes.cls,
-                    current_yolo_results.boxes.conf
-                ):
-                    class_name = current_yolo_results.names[int(cls_id)]
-                    box_tuple = tuple(map(int, box.cpu().numpy()))
-                    detections.append((box_tuple, class_name, float(conf)))
-                
-                relationships, line_info = relationship_tracker.find_relationships(
-                    detections, video_props.width, frame_num
-                )
-                relationship_tracker.update(relationships, frame_num)
-            
-            # Refine "using tool" label with stored tool info
-            # STRICTLY use context_store data (Single Source of Truth)
-            display_label = frame_labels[i]
-            
-            if display_label == "using tool":
-                ctx = context_store.get(frame_num)
-                if ctx and ctx.tool and ctx.tool != "unknown":
-                    display_label = f"using + {ctx.tool}"
-                else:
-                    display_label = "using unknown"
-
-            # Create visualization
-            frame_with_viz = create_visualization(
-                frame=frame,
-                action_label=display_label,
-                yolo_results=current_yolo_results,
-                relationship_lines=line_info,
-                batch_params=batch_params
-            )
-            
-            writer.write(frame_with_viz)
-        
-        writer.release()
-        print(f"Saved labeled video: {video_output_path}")
-        output_files['video'] = video_output_path
-        
-        # Finalize relationships
-        if relationship_tracker:
-            relationship_tracker.finalize(actual_frame_count)
-            
-        tracker.end_section("video_generation")
-    
-    # ==========================================
-    # 7. SAVE OUTPUTS
-    # ==========================================
-    
     print("\nSaving outputs...")
     
     # Save actions CSV
@@ -515,6 +425,132 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
     )
     
     output_files['metadata'] = metadata_path
+
+    # ==========================================
+    # 7. GENERATE LABELED VIDEO (OPTIONAL)
+    # ==========================================
+    
+    if batch_params.generate_labeled_video:
+        print("\nGenerating labeled video...")
+        tracker.start_section("video_generation")
+        
+        try:
+            # Organize videos by batch ID
+            batch_folder = Path(batch_params.video_output_directory) / batch_params.batch_id
+            batch_folder.mkdir(parents=True, exist_ok=True)
+            video_output_path = batch_folder / f"{video_name}.mp4"
+            video_output_path = str(video_output_path)
+            
+            writer = create_video_writer(
+                video_output_path,
+                video_props.fps,
+                video_props.width,
+                video_props.height,
+                batch_params.video_codec
+            )
+            
+            current_yolo_results = None
+            current_relationships = []
+            
+            # Reset relationship tracker for full fidelity tracking
+            if relationship_tracker:
+                relationship_tracker = RelationshipTracker(
+                    fps=video_props.fps,
+                    proximity_threshold_percent=batch_params.proximity_threshold_percent
+                )
+            
+            # Choose iteration method based on frame_cache type
+            if hasattr(frame_cache, 'iter_frames'):
+                # Streaming mode: use efficient sequential iteration
+                frame_iterator = frame_cache.iter_frames(1, actual_frame_count)
+            else:
+                # Legacy mode: iterate over dict
+                frame_iterator = ((i + 1, get_frame_from_cache(frame_cache, i + 1)) for i in range(actual_frame_count))
+
+            for frame_num, frame in frame_iterator:
+                i = frame_num - 1  # Convert to 0-indexed for compatibility
+                
+                # Check if we have cached results for this frame (it was a keyframe)
+                ctx = context_store.get(frame_num)
+                if ctx and ctx.raw_results:
+                    current_yolo_results = ctx.raw_results
+                elif (cv_service and 
+                      batch_params.yolo_vid_frequency > 0 and 
+                      i % batch_params.yolo_vid_frequency == 0):
+                    # Run YOLO periodically if not a keyframe
+                    # Use yolo_vid_frequency for video generation smoothness
+                    current_yolo_results = cv_service.get_results_object(frame, batch_params.cv_confidence_threshold)
+                
+                # Track relationships (full fidelity for video)
+                line_info = []
+                if relationship_tracker and current_yolo_results:
+                    # Extract detections from current results
+                    detections = []
+                    for box, cls_id, conf in zip(
+                        current_yolo_results.boxes.xyxy,
+                        current_yolo_results.boxes.cls,
+                        current_yolo_results.boxes.conf
+                    ):
+                        class_name = current_yolo_results.names[int(cls_id)]
+                        box_tuple = tuple(map(int, box.cpu().numpy()))
+                        detections.append((box_tuple, class_name, float(conf)))
+                    
+                    relationships, line_info = relationship_tracker.find_relationships(
+                        detections, video_props.width, frame_num
+                    )
+                    relationship_tracker.update(relationships, frame_num)
+                
+                # Refine "using tool" label with stored tool info
+                # STRICTLY use context_store data (Single Source of Truth)
+                display_label = frame_labels[i]
+                
+                if display_label == "using tool":
+                    ctx = context_store.get(frame_num)
+                    if ctx and ctx.tool and ctx.tool != "unknown":
+                        display_label = f"using {ctx.tool}"
+                    else:
+                        # Tool is unknown, try to find a guess
+                        guess = None
+                        if ctx:
+                            if ctx.tool_guess:
+                                guess = ctx.tool_guess
+                            elif ctx.tools_detected:
+                                # Fallback to first detected tool from YOLO
+                                guess = ctx.tools_detected[0]
+                        
+                        if guess:
+                            # Truncate to 3 words if too long
+                            words = guess.split()
+                            if len(words) > 3:
+                                guess = " ".join(words[:3]) + "..."
+                            display_label = f"using + unknown ({guess}?)"
+                        else:
+                            display_label = "using unknown"
+
+                # Create visualization
+                frame_with_viz = create_visualization(
+                    frame=frame,
+                    action_label=display_label,
+                    yolo_results=current_yolo_results,
+                    relationship_lines=line_info,
+                    batch_params=batch_params
+                )
+                
+                writer.write(frame_with_viz)
+            
+            writer.release()
+            print(f"Saved labeled video: {video_output_path}")
+            output_files['video'] = video_output_path
+            
+            # Finalize relationships
+            if relationship_tracker:
+                relationship_tracker.finalize(actual_frame_count)
+                
+        except Exception as e:
+            print(f"⚠ Error generating video: {e}")
+            output_files['video_error'] = str(e)
+            
+        tracker.end_section("video_generation")
     
     # Print rate limiter stats if enabled
     if rate_limiter:

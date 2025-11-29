@@ -8,7 +8,7 @@ from video_processing import (
 )
 
 def get_name() -> str:
-    return "1-Second Aggregation"
+    return "07. 1-Second Aggregation"
 
 def get_description() -> str:
     return "Aggregates object detections over the past 1 second of video."
@@ -17,7 +17,8 @@ def get_batch_params() -> BatchParameters:
     return BatchParameters(
         config_name="one_sec_aggregation",
         llm_provider=LLMProvider.CLAUDE,
-        llm_model="claude-sonnet-4-5-20250929",
+        llm_model="claude-haiku-4-5-20251001",
+        api_requests_per_minute=1000,
         prompting_protocol=PromptingProtocolType.CASCADE,
         
         # Standard State Check

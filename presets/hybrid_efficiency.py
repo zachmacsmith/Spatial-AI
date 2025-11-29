@@ -8,26 +8,24 @@ from video_processing import (
 )
 
 def get_name() -> str:
-    return "02. Legacy + Temporal Majority"
+    return "10. Hybrid Efficiency"
 
 def get_description() -> str:
-    return "Legacy logic but uses temporal majority voting for unknown objects."
+    return "Trusts extreme motion scores (Very Idle/Active) to save costs; asks LLM only for ambiguous frames."
 
 def get_batch_params() -> BatchParameters:
     return BatchParameters(
-        config_name="legacy_temporal",
+        config_name="hybrid_efficiency",
         llm_provider=LLMProvider.CLAUDE,
         llm_model="claude-haiku-4-5-20251001",
         api_requests_per_minute=1000,
         prompting_protocol=PromptingProtocolType.CASCADE,
         
-        # Legacy State Check (Motion + LLM)
-        state_check_method=StateCheckMethod.LEGACY_TESTING_CLASS,
+        # CRITICAL CHANGE: Hybrid Logic
+        # Logic: 0 API calls for clear motion, 1 API call for edge cases
+        state_check_method=StateCheckMethod.HYBRID_MOTION_THEN_LLM,
         
-        # YOLO Object Detection (Like TestingClass3)
         enable_object_detection=True,
-        object_check_method=ObjectCheckMethod.LEGACY_TESTING_CLASS,
-        
-        # Temporal Majority for Unknowns
+        object_check_method=ObjectCheckMethod.LLM_STRICT,
         unknown_object_check_method=UnknownObjectCheckMethod.TEMPORAL_MAJORITY,
     )

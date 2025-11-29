@@ -101,6 +101,7 @@ class StateCheckMethod(str, Enum):
     HYBRID_MOTION_THEN_LLM = "hybrid_motion_then_llm"
     CV_OBJECTS_ONLY = "cv_objects_only"
     LEGACY_TESTING_CLASS = "legacy_testing_class"
+    ACTION_MAPPING = "action_mapping"
 
 
 class ObjectCheckMethod(str, Enum):
@@ -206,6 +207,7 @@ class BatchParameters:
     num_frames_per_interval: int = 5
     include_neighbor_frames: bool = True
     cv_detection_frequency: int = 0
+    yolo_vid_frequency: int = 5  # Frequency of YOLO detection for video generation
     enable_temporal_smoothing: bool = True
     temporal_smoothing_window: int = 9
     motion_score_threshold_idle: float = 0.16
@@ -216,6 +218,10 @@ class BatchParameters:
     keyframe_sample_rate: int = 1  # For KEYFRAMES_SAMPLED strategy
     smart_classification_motion_threshold: float = 0.15  # For SMART strategy
     smart_classification_max_gap: int = 50  # Max frames between forced classifications
+    
+    # Keyframe Extraction Parameters
+    keyframe_min_gap: int = 20
+    keyframe_threshold_multiplier: float = 1.0
     
     # ==========================================
     # 5. FEATURE TOGGLES

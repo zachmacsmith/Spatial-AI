@@ -8,7 +8,7 @@ from video_processing import (
 )
 
 def get_name() -> str:
-    return "Strict Enhanced (No Preamble)"
+    return "04. Strict Enhanced (No Preamble)"
 
 def get_description() -> str:
     return "Enhanced Temporal with strict prompting constraints (no reasoning, exact option match only)."
@@ -17,7 +17,8 @@ def get_batch_params() -> BatchParameters:
     return BatchParameters(
         config_name="strict_enhanced",
         llm_provider=LLMProvider.CLAUDE,
-        llm_model="claude-sonnet-4-5-20250929",
+        llm_model="claude-haiku-4-5-20251001",
+        api_requests_per_minute=1000,
         prompting_protocol=PromptingProtocolType.CASCADE,
         
         # Standard State Check

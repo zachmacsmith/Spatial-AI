@@ -8,26 +8,24 @@ from video_processing import (
 )
 
 def get_name() -> str:
-    return "02. Legacy + Temporal Majority"
+    return "09. Pure Context (LLM Direct)"
 
 def get_description() -> str:
-    return "Legacy logic but uses temporal majority voting for unknown objects."
+    return "Ignores motion thresholds completely. Asks LLM to classify state based purely on visual context."
 
 def get_batch_params() -> BatchParameters:
     return BatchParameters(
-        config_name="legacy_temporal",
+        config_name="pure_context_state",
         llm_provider=LLMProvider.CLAUDE,
         llm_model="claude-haiku-4-5-20251001",
         api_requests_per_minute=1000,
         prompting_protocol=PromptingProtocolType.CASCADE,
         
-        # Legacy State Check (Motion + LLM)
-        state_check_method=StateCheckMethod.LEGACY_TESTING_CLASS,
+        # CRITICAL CHANGE: Direct LLM call for state
+        # Logic: 1 API call per frame, no motion heuristics
+        state_check_method=StateCheckMethod.LLM_DIRECT,
         
-        # YOLO Object Detection (Like TestingClass3)
         enable_object_detection=True,
-        object_check_method=ObjectCheckMethod.LEGACY_TESTING_CLASS,
-        
-        # Temporal Majority for Unknowns
+        object_check_method=ObjectCheckMethod.LLM_STRICT,
         unknown_object_check_method=UnknownObjectCheckMethod.TEMPORAL_MAJORITY,
     )

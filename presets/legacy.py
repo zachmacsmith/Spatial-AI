@@ -8,7 +8,7 @@ from video_processing import (
 )
 
 def get_name() -> str:
-    return "Legacy (TestingClass.py)"
+    return "01. Legacy (TestingClass.py)"
 
 def get_description() -> str:
     return "Exact replication of the original TestingClass.py logic (specific prompts & motion thresholds)."
@@ -17,7 +17,8 @@ def get_batch_params() -> BatchParameters:
     return BatchParameters(
         config_name="legacy",
         llm_provider=LLMProvider.CLAUDE,
-        llm_model="claude-sonnet-4-5-20250929",
+        llm_model="claude-haiku-4-5-20251001",
+        api_requests_per_minute=1000,
         prompting_protocol=PromptingProtocolType.CASCADE,
         state_check_method=StateCheckMethod.LEGACY_TESTING_CLASS,
        

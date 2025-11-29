@@ -1102,6 +1102,38 @@ def run_benchmark(videos_to_process, batch_name, model_version, notes="", model_
             print(f"✓ Over/under charts saved to: {charts_dir}")
         except Exception as e:
             print(f"⚠ Error generating over/under charts: {e}")
+            
+    # Generate Benchmark Readme
+    try:
+        # Path to original readme
+        original_readme_path = os.path.join(model_data_dir, "readme.txt")
+        new_readme_path = os.path.join(RESULTS_DIR, "readme.txt")
+        
+        readme_content = ""
+        if os.path.exists(original_readme_path):
+            with open(original_readme_path, 'r') as f:
+                readme_content = f.read()
+        else:
+            readme_content = f"Batch ID: {batch_id}\n(Original readme not found)\n"
+            
+        with open(new_readme_path, 'w') as f:
+            f.write(readme_content)
+            f.write("\n" + "=" * 40 + "\n")
+            f.write("BENCHMARK RESULTS\n")
+            f.write("=" * 40 + "\n")
+            f.write(f"Date: {run_timestamp}\n")
+            f.write(f"Videos Processed: {len(videos_with_gt)}\n")
+            f.write(f"Average State Accuracy: {avg_state_accuracy:.2%}\n")
+            if avg_object_accuracy is not None:
+                f.write(f"Average Object Accuracy: {avg_object_accuracy:.2%}\n")
+            else:
+                f.write("Average Object Accuracy: N/A\n")
+            f.write(f"Total Processing Time: {total_processing_time:.2f}s\n")
+            f.write(f"Average Speed Ratio: {avg_speed_ratio:.2f}x\n")
+            
+        print(f"✓ Created benchmark README at: {new_readme_path}")
+    except Exception as e:
+        print(f"⚠ Error creating benchmark README: {e}")
     
     return {
         'avg_state_accuracy': avg_state_accuracy,

@@ -8,7 +8,7 @@ from video_processing import (
 )
 
 def get_name() -> str:
-    return "Enhanced Temporal (CV + Smoothing)"
+    return "03. Enhanced Temporal (CV + Smoothing)"
 
 def get_description() -> str:
     return "Combines CV-based object detection (TestingClass2) with Temporal Smoothing and Majority Voting (Legacy Temporal)."
@@ -17,7 +17,8 @@ def get_batch_params() -> BatchParameters:
     return BatchParameters(
         config_name="enhanced_temporal",
         llm_provider=LLMProvider.CLAUDE,
-        llm_model="claude-sonnet-4-5-20250929",
+        llm_model="claude-haiku-4-5-20251001",
+        api_requests_per_minute=1000,
         prompting_protocol=PromptingProtocolType.CASCADE,
         
         # Legacy State Check (Motion + LLM)
