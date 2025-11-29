@@ -195,7 +195,7 @@ class BatchParameters:
     allowed_actions: List[str] = field(default_factory=lambda: ["using tool", "idle", "moving"])
     tool_detection_method: ToolDetectionMethod = ToolDetectionMethod.CV_INFERENCE
     allowed_tools: List[str] = field(default_factory=lambda: [
-        "brick trowel", "caulk gun", "drill", "pencil", "saw", "brick", "measuring", "hammer", "unknown"
+        "brick trowel", "caulk gun", "drill", "pencil", "saw", "brick", "measuring", "hammer", "nail gun", "unknown"
     ])
     enable_relationship_tracking: bool = True
     proximity_threshold_percent: float = 0.18

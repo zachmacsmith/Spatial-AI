@@ -49,6 +49,12 @@ ACTION_DATABASE: List[ActionRule] = [
         action="cutting",
         description="User has a saw, likely cutting material.",
         confidence=0.7
+    ),
+    ActionRule(
+        required_objects={"nail gun"},
+        action="fastening",
+        description="User has a nail gun, likely fastening.",
+        confidence=0.9
     )
 ]
 

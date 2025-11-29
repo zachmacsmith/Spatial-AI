@@ -91,29 +91,36 @@ def compare_models(batch_ids: List[str],
         
         # Load performance data if requested
         if include_performance:
-            try:
-                timing_file = "outputs/timing_results.csv"
-                if os.path.exists(timing_file):
-                    timing_df = pd.read_csv(timing_file)
-                    batch_timing = timing_df[timing_df['batch'] == batch_id]
-                    
-                    if len(batch_timing) > 0:
-                        batch_info['avg_processing_time'] = batch_timing['processing_time_sec'].mean()
-                        batch_info['avg_speed_ratio'] = (batch_timing['processing_time_sec'] / batch_timing['video_duration_sec']).mean()
-                        batch_info['videos_processed'] = len(batch_timing)
+            # Try to get performance from accuracy data first (all_results.csv)
+            if 'batch_acc' in locals() and len(batch_acc) > 0 and 'speed_ratio' in batch_acc.columns:
+                batch_info['avg_processing_time'] = batch_acc['processing_time'].mean()
+                batch_info['avg_speed_ratio'] = batch_acc['speed_ratio'].mean()
+                batch_info['videos_processed'] = len(batch_acc)
+            else:
+                # Fallback to timing_results.csv
+                try:
+                    timing_file = "outputs/timing_results.csv"
+                    if os.path.exists(timing_file):
+                        timing_df = pd.read_csv(timing_file)
+                        batch_timing = timing_df[timing_df['batch'] == batch_id]
+                        
+                        if len(batch_timing) > 0:
+                            batch_info['avg_processing_time'] = batch_timing['processing_time_sec'].mean()
+                            batch_info['avg_speed_ratio'] = (batch_timing['processing_time_sec'] / batch_timing['video_duration_sec']).mean()
+                            batch_info['videos_processed'] = len(batch_timing)
+                        else:
+                            batch_info['avg_processing_time'] = None
+                            batch_info['avg_speed_ratio'] = None
+                            batch_info['videos_processed'] = 0
                     else:
                         batch_info['avg_processing_time'] = None
                         batch_info['avg_speed_ratio'] = None
                         batch_info['videos_processed'] = 0
-                else:
+                except Exception as e:
+                    print(f"⚠ Could not load performance data for {batch_id}: {e}")
                     batch_info['avg_processing_time'] = None
                     batch_info['avg_speed_ratio'] = None
                     batch_info['videos_processed'] = 0
-            except Exception as e:
-                print(f"⚠ Could not load performance data for {batch_id}: {e}")
-                batch_info['avg_processing_time'] = None
-                batch_info['avg_speed_ratio'] = None
-                batch_info['videos_processed'] = 0
         
         comparison_data.append(batch_info)
     

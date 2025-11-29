@@ -16,13 +16,96 @@ RESULTS_FILE = "benchmark_summary.csv"
 UNIFIED_RESULTS_FILE = "benchmark_results/all_results.csv"
 UNIFIED_SUMMARY_FILE = "benchmark_results/run_summary.csv"
 
+def repair_and_load_csv(file_path):
+    """
+    Robust CSV loader that handles ParserError by padding rows with missing fields.
+    Useful for files where schema has evolved (new columns added).
+    """
+    try:
+        return pd.read_csv(file_path)
+    except pd.errors.ParserError:
+        print(f"⚠ ParserError detected in {file_path}. Attempting to repair...")
+        
+        # Read raw lines
+        with open(file_path, 'r') as f:
+            lines = f.readlines()
+            
+        if not lines:
+            return pd.DataFrame()
+            
+        # Parse header
+        header = lines[0].strip().split(',')
+        
+        # Find max columns
+        max_cols = len(header)
+        data_rows = []
+        
+        for line in lines[1:]:
+            row = line.strip().split(',')
+            max_cols = max(max_cols, len(row))
+            data_rows.append(row)
+            
+        # If max_cols > len(header), we have unnamed columns or data overflow
+        # But usually it's the other way around or mixed.
+        # Let's assume the header is correct for the OLD schema, but some rows have NEW schema (more cols)
+        # OR header is NEW schema, but some rows are OLD schema (fewer cols)
+        
+        # Actually, the error "Expected 12 fields in line 10, saw 17" implies 
+        # the header has 12 columns, but some data row has 17.
+        # So we need to extend the header if possible, or just treat extra cols as unknown.
+        
+        # Better approach: Read with python csv module to handle quoting, then pad
+        import csv
+        import io
+        
+        # Re-read properly
+        with open(file_path, 'r') as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+            
+        if not rows:
+            return pd.DataFrame()
+            
+        header = rows[0]
+        max_len = max(len(r) for r in rows)
+        
+        # If header is shorter than max_len, generate dummy column names
+        if len(header) < max_len:
+            for i in range(len(header), max_len):
+                header.append(f"extra_col_{i}")
+                
+        # Pad all rows to max_len
+        padded_rows = []
+        for r in rows[1:]:
+            if len(r) < max_len:
+                r.extend([None] * (max_len - len(r)))
+            padded_rows.append(r)
+            
+        return pd.DataFrame(padded_rows, columns=header)
+    except Exception as e:
+        print(f"⚠ Failed to load/repair {file_path}: {e}")
+        return pd.DataFrame()
+
 ## Parses the time stamp
 def parse_timestamp(time_str):
     """Convert 'M:SS' to seconds as float."""
-    parts = time_str.split(':')
-    minutes = int(parts[0])
-    seconds = int(parts[1])
-    return minutes * 60 + seconds
+    if pd.isna(time_str):
+        return 0.0
+    
+    if isinstance(time_str, (int, float)):
+        return float(time_str)
+        
+    try:
+        time_str = str(time_str).strip()
+        if ':' in time_str:
+            parts = time_str.split(':')
+            minutes = int(parts[0])
+            seconds = int(parts[1])
+            return minutes * 60 + seconds
+        else:
+            return float(time_str)
+    except (ValueError, IndexError):
+        return 0.0
 
 def load_ground_truth(csv_path='TestData/LabelledData.csv'):
     """Load ground truth data and get available video IDs."""
@@ -34,6 +117,12 @@ def load_ground_truth(csv_path='TestData/LabelledData.csv'):
     df['Object'] = df['Object'].fillna('Unknown')
     df['Object'] = df['Object'].replace('', 'Unknown')
     df['Object'] = df['Object'].astype(str).replace('nan', 'Unknown')
+    
+    # Ensure Video ID is integer
+    # Filter out non-numeric IDs if any
+    df['Video ID'] = pd.to_numeric(df['Video ID'], errors='coerce')
+    df = df.dropna(subset=['Video ID'])
+    df['Video ID'] = df['Video ID'].astype(int)
     
     available_video_ids = sorted(df['Video ID'].unique())
     
@@ -861,7 +950,7 @@ def run_benchmark(videos_to_process, batch_name, model_version, notes="", model_
     def get_next_run_id():
         if os.path.exists(UNIFIED_RESULTS_FILE):
             try:
-                df = pd.read_csv(UNIFIED_RESULTS_FILE)
+                df = repair_and_load_csv(UNIFIED_RESULTS_FILE)
                 if len(df) > 0 and 'run_id' in df.columns:
                     return df['run_id'].max() + 1
             except:
@@ -927,6 +1016,11 @@ def run_benchmark(videos_to_process, batch_name, model_version, notes="", model_
             except Exception as e:
                 print(f"  ⚠ Could not load metadata for {video_name}: {e}")
 
+            # Update all_results with performance data for per-video comparison
+            if perf_stats and video_name in all_results:
+                all_results[video_name]['processing_time'] = perf_stats.get('total_time_seconds')
+                all_results[video_name]['speed_ratio'] = perf_stats.get('speed_ratio')
+            
             results_records.append({
                 'run_id': run_id,
                 'timestamp': run_timestamp,
@@ -1003,10 +1097,48 @@ def run_benchmark(videos_to_process, batch_name, model_version, notes="", model_
     
     # Append to unified results file
     if os.path.exists(UNIFIED_RESULTS_FILE):
-        results_df.to_csv(UNIFIED_RESULTS_FILE, mode='a', header=False, index=False)
+        try:
+            # Read existing to check columns
+            existing_df = repair_and_load_csv(UNIFIED_RESULTS_FILE)
+            
+            # Identify new columns in results_df that are not in existing_df
+            new_cols = [c for c in results_df.columns if c not in existing_df.columns]
+            
+            # Identify missing columns in results_df that are in existing_df
+            missing_cols = [c for c in existing_df.columns if c not in results_df.columns]
+            
+            if new_cols or missing_cols:
+                # Schema mismatch - need to align
+                print(f"⚠ Schema mismatch in {UNIFIED_RESULTS_FILE}. Aligning columns...")
+                
+                # Add new columns to existing_df (fill with NaN)
+                for col in new_cols:
+                    existing_df[col] = None
+                    
+                # Add missing columns to results_df (fill with NaN)
+                for col in missing_cols:
+                    results_df[col] = None
+                
+                # Reorder results_df to match existing_df (plus new columns at end)
+                combined_cols = list(existing_df.columns)
+                results_df = results_df[combined_cols]
+                
+                # Append and write back entire file to update header
+                final_df = pd.concat([existing_df, results_df], ignore_index=True)
+                final_df.to_csv(UNIFIED_RESULTS_FILE, index=False)
+                print(f"✓ Updated unified file schema and appended results.")
+            else:
+                # Schemas match, just append
+                results_df.to_csv(UNIFIED_RESULTS_FILE, mode='a', header=False, index=False)
+                print(f"✓ Results appended to unified file: {UNIFIED_RESULTS_FILE}")
+                
+        except Exception as e:
+            print(f"⚠ Error updating unified file: {e}")
+            # Fallback to append (might fail if columns don't match)
+            results_df.to_csv(UNIFIED_RESULTS_FILE, mode='a', header=False, index=False)
     else:
         results_df.to_csv(UNIFIED_RESULTS_FILE, mode='w', header=True, index=False)
-    print(f"✓ Results appended to unified file: {UNIFIED_RESULTS_FILE}")
+        print(f"✓ Results appended to unified file: {UNIFIED_RESULTS_FILE}")
     
     # Save summary statistics
     summary_data = {

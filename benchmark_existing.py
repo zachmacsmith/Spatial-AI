@@ -28,6 +28,37 @@ def get_videos_from_batch(batch_folder):
             videos.add(video_name)
     return sorted(videos)
 
+def get_batch_note(batch_folder):
+    """
+    Get the description/note for a batch.
+    Tries to read from batch_tracking json first, then readme.txt.
+    """
+    import json
+    
+    # Try batch tracking JSON
+    try:
+        tracking_path = Path("outputs/batch_tracking") / f"{batch_folder.name}.json"
+        if tracking_path.exists():
+            with open(tracking_path, 'r') as f:
+                config = json.load(f)
+                if 'config_description' in config and config['config_description']:
+                    return config['config_description']
+    except:
+        pass
+        
+    # Try readme.txt
+    try:
+        readme_path = batch_folder / "readme.txt"
+        if readme_path.exists():
+            with open(readme_path, 'r') as f:
+                for line in f:
+                    if line.startswith("Note:"):
+                        return line.replace("Note:", "").strip()
+    except:
+        pass
+        
+    return ""
+
 def main():
     print("=" * 70)
     print("BENCHMARK EXISTING BATCHES")
@@ -42,9 +73,16 @@ def main():
         return
     
     print(f"Found {len(batch_folders)} batch folders:\n")
-    for i, folder in enumerate(batch_folders, 1):
+    print(f"Found {len(batch_folders)} batch folders:\n")
+    
+    # Print in reverse order (1 at the bottom = Newest)
+    for i in range(len(batch_folders) - 1, -1, -1):
+        folder = batch_folders[i]
         videos = get_videos_from_batch(folder)
-        print(f"{i}. {folder.name}")
+        note = get_batch_note(folder)
+        
+        note_str = f" - {note}" if note else ""
+        print(f"{i+1}. {folder.name}{note_str}")
         print(f"   Videos: {', '.join(videos) if videos else 'None'}")
         print()
     

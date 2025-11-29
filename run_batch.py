@@ -9,6 +9,7 @@ import importlib.util
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+import logging
 
 # Add current directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -157,6 +158,26 @@ class DualLogger:
 
     def close(self):
         self.file.close()
+
+def cleanup_logging_handlers(stream_obj):
+    """
+    Remove any logging handlers that reference the given stream object.
+    This prevents external libraries (like ultralytics) from holding onto
+    closed file streams.
+    """
+    # Check root logger
+    for handler in logging.root.handlers[:]:
+        if hasattr(handler, 'stream') and handler.stream is stream_obj:
+            logging.root.removeHandler(handler)
+            
+    # Check ultralytics logger specifically
+    try:
+        yolo_logger = logging.getLogger("ultralytics")
+        for handler in yolo_logger.handlers[:]:
+            if hasattr(handler, 'stream') and handler.stream is stream_obj:
+                yolo_logger.removeHandler(handler)
+    except Exception:
+        pass
 
 def main():
     """Main entry point"""
@@ -318,6 +339,11 @@ def main():
             # Restore stdout/stderr and close loggers
             sys.stdout = original_stdout
             sys.stderr = original_stderr
+            
+            # Cleanup handlers that might be holding onto our streams
+            cleanup_logging_handlers(logger_out)
+            cleanup_logging_handlers(logger_err)
+            
             logger_out.close()
             logger_err.close()
 
