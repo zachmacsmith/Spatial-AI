@@ -2,6 +2,7 @@
 import pandas as pd
 import os
 from datetime import datetime
+from collections import defaultdict
 import matplotlib
 matplotlib.use('Agg')  # Non-interactive backend
 import matplotlib.pyplot as plt
@@ -289,7 +290,7 @@ def calculate_overlap(predicted_df, ground_truth_df, video_id, total_duration):
             gt_object[idx] = effective_gt_obj
     
     # Calculate state accuracy
-    state_correct = sum(1 for i in range(timeline_length) if pred_state[i] == gt_state[i])
+    state_correct_count = sum(1 for i in range(timeline_length) if pred_state[i] == gt_state[i])
     
     # Calculate object accuracy only when both are "using tool"
     using_tool_indices = [i for i in range(timeline_length) 
@@ -413,13 +414,59 @@ def calculate_overlap(predicted_df, ground_truth_df, video_id, total_duration):
                 
     guess_accuracy = count_correct_guess / count_with_guess if count_with_guess > 0 else None
     
+    # Calculate Over/Under Prediction Stats
+    tool_over = defaultdict(float)
+    tool_under = defaultdict(float)
+    tool_correct = defaultdict(float)
+    state_over = defaultdict(float)
+    state_under = defaultdict(float)
+    state_correct = defaultdict(float)
+    
+    for i in range(timeline_length):
+        p_obj = str(pred_object[i]).lower() if pred_object[i] else 'unknown'
+        g_obj = str(gt_object[i]).lower() if gt_object[i] else 'unknown'
+        p_state = str(pred_state[i]).lower() if pred_state[i] else 'unknown'
+        g_state = str(gt_state[i]).lower() if gt_state[i] else 'unknown'
+        
+        # Tool Over/Under/Correct
+        if p_obj != g_obj:
+            # If predicted is not unknown, it's an overprediction of that tool (since it's not in GT)
+            if p_obj != 'unknown':
+                tool_over[p_obj] += resolution
+            # If GT is not unknown, it's an underprediction of that tool (since it wasn't predicted)
+            if g_obj != 'unknown':
+                tool_under[g_obj] += resolution
+        else:
+            # Correct identification
+            if p_obj != 'unknown':
+                tool_correct[p_obj] += resolution
+                
+        # State Over/Under/Correct
+        if p_state != g_state:
+            if p_state != 'unknown':
+                state_over[p_state] += resolution
+            if g_state != 'unknown':
+                state_under[g_state] += resolution
+        else:
+            # Correct identification
+            if p_state != 'unknown':
+                state_correct[p_state] += resolution
+
     return {
-        'state_accuracy': state_correct / timeline_length,
+        'state_accuracy': state_correct_count / timeline_length, # Note: state_correct variable name collision, using state_correct_count from earlier
         'object_accuracy': object_accuracy,
         'guess_accuracy': guess_accuracy,
         'using_tool_time': len(using_tool_indices) * resolution,
         'total_time': total_duration,
-        'guess_time': count_with_guess * resolution
+        'guess_time': count_with_guess * resolution,
+        'over_under': {
+            'tool_over': dict(tool_over),
+            'tool_under': dict(tool_under),
+            'tool_correct': dict(tool_correct),
+            'state_over': dict(state_over),
+            'state_under': dict(state_under),
+            'state_correct': dict(state_correct)
+        }
     }
 
 def generate_accuracy_charts(results_df, output_dir):
@@ -637,10 +684,135 @@ def generate_comparison_charts(results_list, output_dir):
     print(f"✓ Generated comparison charts in: {output_dir}")
     return chart_paths
 
+def generate_performance_charts(results_df, output_dir):
+    """
+    Generate performance visualization charts.
+    
+    Args:
+        results_df: DataFrame with benchmark results (including performance stats)
+        output_dir: Directory to save charts
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    chart_paths = []
+    
+    # Set style
+    sns.set_style("whitegrid")
+    plt.rcParams['figure.facecolor'] = 'white'
+    
+    # Check if we have performance data
+    if 'processing_time' not in results_df.columns or results_df['processing_time'].isnull().all():
+        print("No performance data available for charts.")
+        return []
+        
+    # Chart 1: Processing Time per Video
+    fig, ax = plt.subplots(figsize=(12, 6))
+    sns.barplot(data=results_df, x='video_name', y='processing_time', ax=ax, color='#FF9800', edgecolor='black')
+    
+    ax.set_title('Processing Time per Video', fontsize=14, fontweight='bold')
+    ax.set_ylabel('Time (seconds)', fontsize=12, fontweight='bold')
+    ax.set_xlabel('Video', fontsize=12, fontweight='bold')
+    plt.xticks(rotation=45, ha='right')
+    
+    # Add value labels
+    for container in ax.containers:
+        ax.bar_label(container, fmt='%.1fs', padding=3)
+        
+    plt.tight_layout()
+    chart1_path = os.path.join(output_dir, 'performance_time_per_video.png')
+    plt.savefig(chart1_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    chart_paths.append(chart1_path)
+    
+    # Chart 2: Speed Ratio (Processing Time / Video Duration)
+    if 'speed_ratio' in results_df.columns and results_df['speed_ratio'].notna().any():
+        fig, ax = plt.subplots(figsize=(12, 6))
+        sns.barplot(data=results_df, x='video_name', y='speed_ratio', ax=ax, color='#9C27B0', edgecolor='black')
+        
+        ax.set_title('Speed Ratio (Lower is Faster)', fontsize=14, fontweight='bold')
+        ax.set_ylabel('Ratio (Proc Time / Vid Duration)', fontsize=12, fontweight='bold')
+        ax.set_xlabel('Video', fontsize=12, fontweight='bold')
+        plt.xticks(rotation=45, ha='right')
+        
+        # Add reference line for 1.0 (Real-time)
+        ax.axhline(1.0, color='red', linestyle='--', label='Real-time (1.0x)')
+        ax.legend()
+        
+        # Add value labels
+        for container in ax.containers:
+            ax.bar_label(container, fmt='%.2fx', padding=3)
+            
+        plt.tight_layout()
+        chart2_path = os.path.join(output_dir, 'performance_speed_ratio.png')
+        plt.savefig(chart2_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        chart_paths.append(chart2_path)
+        
+    return chart_paths
+
+def generate_performance_comparison_charts(results_list, output_dir):
+    """
+    Generate performance comparison charts for multiple batches.
+    """
+    if not results_list:
+        return []
+        
+    os.makedirs(output_dir, exist_ok=True)
+    chart_paths = []
+    
+    # Prepare data
+    data = []
+    for res in results_list:
+        label = res.get('label', res.get('batch_id', 'Unknown'))
+        
+        # Calculate aggregates if not present (though run_benchmark should provide them)
+        # We'll use what's in the result dict
+        
+        # We need average processing time per video, or total?
+        # Let's look at per-video results to get averages
+        if 'per_video_results' in res:
+            times = [v['processing_time'] for v in res['per_video_results'].values() if v.get('processing_time')]
+            ratios = [v['speed_ratio'] for v in res['per_video_results'].values() if v.get('speed_ratio')]
+            
+            avg_time = sum(times) / len(times) if times else 0
+            avg_ratio = sum(ratios) / len(ratios) if ratios else 0
+            total_time = sum(times)
+            
+            data.append({
+                'Batch': label,
+                'Avg Processing Time (s)': avg_time,
+                'Avg Speed Ratio': avg_ratio,
+                'Total Time (s)': total_time
+            })
+            
+    if not data:
+        return []
+        
+    df = pd.DataFrame(data)
+    
+    # Chart 1: Average Speed Ratio Comparison
+    fig, ax = plt.subplots(figsize=(10, 6))
+    sns.barplot(data=df, x='Batch', y='Avg Speed Ratio', hue='Batch', ax=ax, palette='magma', edgecolor='black', legend=False)
+    
+    ax.set_title('Batch Comparison: Average Speed Ratio', fontsize=14, fontweight='bold')
+    ax.set_ylabel('Speed Ratio (Lower is Faster)', fontsize=12, fontweight='bold')
+    ax.set_xlabel('Batch', fontsize=12, fontweight='bold')
+    plt.xticks(rotation=45, ha='right')
+    
+    for container in ax.containers:
+        ax.bar_label(container, fmt='%.2fx', padding=3)
+        
+    plt.tight_layout()
+    chart1_path = os.path.join(output_dir, 'comparison_performance_speed.png')
+    plt.savefig(chart1_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    chart_paths.append(chart1_path)
+    
+    return chart_paths
+
 # ----------------------------
 # Main benchmark function
 # ----------------------------
-def run_benchmark(videos_to_process, batch_name, model_version, notes="", model_data_dir="outputs/data/", batch_id=None):
+def run_benchmark(videos_to_process, batch_name, model_version, notes="", model_data_dir="outputs/data/", batch_id=None, performance_mode="none", generate_over_under=False):
     """
     Run benchmark on a list of videos.
     
@@ -708,6 +880,15 @@ def run_benchmark(videos_to_process, batch_name, model_version, notes="", model_
     all_results = {}
     results_records = []
     
+    # Aggregation for Over/Under
+    agg_tool_over = defaultdict(float)
+    agg_tool_under = defaultdict(float)
+    agg_tool_correct = defaultdict(float)
+    agg_state_over = defaultdict(float)
+    agg_state_under = defaultdict(float)
+    agg_state_correct = defaultdict(float)
+    total_agg_duration = 0
+    
     print("\nProcessing videos...")
     for i, video_name in enumerate(videos_with_gt, 1):
         print(f"\n{'='*50}")
@@ -721,6 +902,17 @@ def run_benchmark(videos_to_process, batch_name, model_version, notes="", model_
             modeldata, total_duration = load_labeled_data(modelDataPath)
             results = calculate_overlap(modeldata, testdata, video_id=video_id, total_duration=total_duration)
             all_results[video_name] = results
+            
+            # Aggregate over/under stats
+            if 'over_under' in results:
+                ou = results['over_under']
+                for k, v in ou['tool_over'].items(): agg_tool_over[k] += v
+                for k, v in ou['tool_under'].items(): agg_tool_under[k] += v
+                for k, v in ou['tool_correct'].items(): agg_tool_correct[k] += v
+                for k, v in ou['state_over'].items(): agg_state_over[k] += v
+                for k, v in ou['state_under'].items(): agg_state_under[k] += v
+                for k, v in ou['state_correct'].items(): agg_state_correct[k] += v
+            total_agg_duration += results['total_time']
             
             # Load performance stats from metadata if available
             perf_stats = {}
@@ -798,6 +990,9 @@ def run_benchmark(videos_to_process, batch_name, model_version, notes="", model_
     
     print(f"Total Processing Time: {total_processing_time:.2f}s")
     print(f"Average Speed Ratio: {avg_speed_ratio:.2f}x")
+    
+    # Save results to CSV
+
     print(f"Total API Calls: {total_api_calls}")
     
     # Save outputs to per-run folder
@@ -875,9 +1070,38 @@ def run_benchmark(videos_to_process, batch_name, model_version, notes="", model_
         print(f"\n✓ Generated {len(chart_paths)} accuracy charts:")
         for chart_path in chart_paths:
             print(f"  - {chart_path}")
+            
+        # Generate performance charts if requested
+        if performance_mode == "full":
+            print("Generating performance charts...")
+            perf_charts = generate_performance_charts(results_df, charts_dir)
+            chart_paths.extend(perf_charts)
+            for path in perf_charts:
+                print(f"  - {path}")
     except Exception as e:
         print(f"⚠ Error generating charts: {e}")
         chart_paths = []
+        
+    if generate_over_under:
+        print("\nGenerating over/under prediction charts...")
+        
+        # Get allowed tools if available
+        allowed_tools = None
+        if batch_params and hasattr(batch_params, 'allowed_tools'):
+            allowed_tools = [t.lower() for t in batch_params.allowed_tools]
+            
+        try:
+            generate_over_under_charts({
+                'tool_over': agg_tool_over,
+                'tool_under': agg_tool_under,
+                'tool_correct': agg_tool_correct,
+                'state_over': agg_state_over,
+                'state_under': agg_state_under,
+                'state_correct': agg_state_correct
+            }, total_agg_duration, charts_dir, allowed_tools=allowed_tools)
+            print(f"✓ Over/under charts saved to: {charts_dir}")
+        except Exception as e:
+            print(f"⚠ Error generating over/under charts: {e}")
     
     return {
         'avg_state_accuracy': avg_state_accuracy,
@@ -890,6 +1114,77 @@ def run_benchmark(videos_to_process, batch_name, model_version, notes="", model_
         'per_video_results': all_results, # Return detailed results for comparison
         'notes': notes
     }
+
+
+
+def generate_over_under_charts(aggregated_over_under, total_duration, output_dir, allowed_tools=None):
+    """
+    Generate charts for over/under prediction of tools and states.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Helper to plot
+    # Helper to plot
+    def plot_over_under(data_over, data_under, data_correct, title, filename, is_proportion=False, filter_keys=None):
+        # Combine keys
+        all_keys = sorted(list(set(data_over.keys()) | set(data_under.keys()) | set(data_correct.keys())))
+        
+        # Filter keys if provided
+        if filter_keys:
+            all_keys = [k for k in all_keys if k in filter_keys]
+            
+        if not all_keys:
+            return
+            
+        over_vals = [data_over.get(k, 0) for k in all_keys]
+        under_vals = [-data_under.get(k, 0) for k in all_keys] # Negative for under
+        correct_vals = [data_correct.get(k, 0) for k in all_keys]
+        
+        if is_proportion and total_duration > 0:
+            over_vals = [v / total_duration * 100 for v in over_vals]
+            under_vals = [v / total_duration * 100 for v in under_vals]
+            correct_vals = [v / total_duration * 100 for v in correct_vals]
+            ylabel = "Percentage of Total Time (%)"
+        else:
+            ylabel = "Duration (seconds)"
+            
+        fig, ax = plt.subplots(figsize=(14, 7))
+        x_pos = range(len(all_keys))
+        width = 0.35
+        
+        # Plot Over/Under on the left (offset)
+        ax.bar([x - width/2 for x in x_pos], over_vals, width=width, color='#FFC107', label='Overprediction (FP)', edgecolor='black')
+        ax.bar([x - width/2 for x in x_pos], under_vals, width=width, color='#F44336', label='Underprediction (FN)', edgecolor='black')
+        
+        # Plot Correct on the right (offset)
+        ax.bar([x + width/2 for x in x_pos], correct_vals, width=width, color='#4CAF50', label='Correct (TP)', edgecolor='black')
+        
+        ax.set_xticks(x_pos)
+        ax.set_xticklabels(all_keys, rotation=45, ha='right')
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.legend()
+        ax.axhline(0, color='black', linewidth=0.8)
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, filename))
+        plt.close()
+        
+    # 1. Tool Over/Under (Seconds)
+    plot_over_under(aggregated_over_under['tool_over'], aggregated_over_under['tool_under'], aggregated_over_under['tool_correct'],
+                   "Tool Prediction Analysis (Seconds)", "tool_over_under_seconds.png", filter_keys=allowed_tools)
+                   
+    # 2. Tool Over/Under (Proportion)
+    plot_over_under(aggregated_over_under['tool_over'], aggregated_over_under['tool_under'], aggregated_over_under['tool_correct'],
+                   "Tool Prediction Analysis (%)", "tool_over_under_percent.png", is_proportion=True, filter_keys=allowed_tools)
+                   
+    # 3. State Over/Under (Seconds)
+    plot_over_under(aggregated_over_under['state_over'], aggregated_over_under['state_under'], aggregated_over_under['state_correct'],
+                   "State Prediction Analysis (Seconds)", "state_over_under_seconds.png")
+                   
+    # 4. State Over/Under (Proportion)
+    plot_over_under(aggregated_over_under['state_over'], aggregated_over_under['state_under'], aggregated_over_under['state_correct'],
+                   "State Prediction Analysis (%)", "state_over_under_percent.png", is_proportion=True)
 
 # ----------------------------
 # Interactive CLI (when run standalone)

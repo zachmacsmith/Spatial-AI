@@ -54,6 +54,7 @@ class FrameLoader:
         
         # Initialize cache
         self._cache: OrderedDict[int, np.ndarray] = OrderedDict()
+        self._pinned: Dict[int, np.ndarray] = {}  # Pinned frames never evicted
         self._lock = Lock()
         
         # Statistics
@@ -75,6 +76,11 @@ class FrameLoader:
             return None
         
         with self._lock:
+            # Check pinned frames first
+            if frame_number in self._pinned:
+                self.cache_hits += 1
+                return self._pinned[frame_number]
+
             # Cache hit
             if frame_number in self._cache:
                 self.cache_hits += 1
@@ -105,17 +111,24 @@ class FrameLoader:
         # OpenCV is 0-indexed, our API is 1-indexed
         target_position = frame_number - 1
         
-        # Seek to frame
-        self.cap.set(cv2.CAP_PROP_POS_FRAMES, target_position)
-        
-        # Read frame
-        ret, frame = self.cap.read()
-        
-        if not ret:
-            return None
-        
-        # Return BGR to match existing convention
-        return frame
+        # Retry logic for robust reading
+        max_retries = 3
+        for attempt in range(max_retries):
+            # Seek to frame
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, target_position)
+            
+            # Read frame
+            ret, frame = self.cap.read()
+            
+            if ret:
+                # Return BGR to match existing convention
+                return frame
+                
+            # If failed, wait briefly and retry
+            import time
+            time.sleep(0.1)
+            
+        return None
 
     def preload(self, frame_numbers: List[int]) -> None:
         """
@@ -127,6 +140,22 @@ class FrameLoader:
         for fn in frame_numbers:
             if 1 <= fn <= self.frame_count:
                 self.get(fn)  # Populates cache as side effect
+
+    def pin(self, frame_numbers: List[int]) -> None:
+        """
+        Load and pin frames in memory. Pinned frames are never evicted.
+        Useful for keyframes that must remain available.
+        """
+        with self._lock:
+            for fn in frame_numbers:
+                if 1 <= fn <= self.frame_count:
+                    if fn not in self._pinned:
+                        frame = self._load_frame(fn)
+                        if frame is not None:
+                            self._pinned[fn] = frame
+                            # Remove from LRU if present to save space
+                            if fn in self._cache:
+                                del self._cache[fn]
 
     def iter_frames(self, start: int = 1, end: Optional[int] = None) -> Iterator[Tuple[int, np.ndarray]]:
         """
@@ -175,6 +204,7 @@ class FrameLoader:
         """Clear frame cache, keep video file open"""
         with self._lock:
             self._cache.clear()
+            self._pinned.clear()
             self.cache_hits = 0
             self.cache_misses = 0
 
@@ -182,6 +212,7 @@ class FrameLoader:
         """Release video file and clear cache"""
         with self._lock:
             self._cache.clear()
+            self._pinned.clear()
         self.cap.release()
 
     def __enter__(self) -> 'FrameLoader':

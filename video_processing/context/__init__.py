@@ -6,6 +6,7 @@ from .context_builder import (
     STRATEGIES,
     COMPONENTS
 )
+from .decision_context import DecisionContext
 
 __all__ = [
     'FrameContext',
@@ -15,4 +16,5 @@ __all__ = [
     'get_context_builder',
     'STRATEGIES',
     'COMPONENTS',
+    'DecisionContext',
 ]

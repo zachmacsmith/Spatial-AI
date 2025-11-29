@@ -82,9 +82,27 @@ def main():
         print("No valid batches selected.")
         return
     
+    # Ask for performance analysis options
+    print("\nPerformance Analysis:")
+    print("  0 - None (Skip performance charts)")
+    print("  1 - Averages Only (Summary tables/charts)")
+    print("  2 - Full Breakdown (Per-video charts + Averages)")
+    print("  3 - Over/Under Analysis (Includes Full Breakdown)")
+    perf_choice = input("Select option (0/1/2/3): ").strip()
+    
+    performance_mode = "none"
+    generate_over_under = False
+    if perf_choice == '1':
+        performance_mode = "averages"
+    elif perf_choice == '2':
+        performance_mode = "full"
+    elif perf_choice == '3':
+        performance_mode = "full"
+        generate_over_under = True
+        
     # Import benchmark function (only after user has made selection)
     try:
-        from post_processing.accuracy_benchmark import run_benchmark, generate_comparison_charts
+        from post_processing.accuracy_benchmark import run_benchmark, generate_comparison_charts, generate_performance_comparison_charts
     except ImportError as e:
         print(f"❌ Error importing benchmark: {e}")
         print("Make sure seaborn is installed: pip install seaborn")
@@ -142,7 +160,9 @@ def main():
                 model_version=model_version,
                 notes=notes,
                 model_data_dir=str(batch_folder) + "/",
-                batch_id=batch_id
+                batch_id=batch_id,
+                performance_mode=performance_mode,
+                generate_over_under=generate_over_under
             )
             if result:
                 all_benchmark_results.append(result)
@@ -162,6 +182,11 @@ def main():
         try:
             generate_comparison_charts(all_benchmark_results, comparison_dir)
             print(f"\n✓ Comparison charts saved to: {comparison_dir}")
+            
+            if performance_mode != "none":
+                generate_performance_comparison_charts(all_benchmark_results, comparison_dir)
+                print(f"✓ Performance comparison charts saved to: {comparison_dir}")
+                
         except Exception as e:
             print(f"❌ Error generating comparison charts: {e}")
             import traceback

@@ -3,7 +3,7 @@ from typing import List, Dict, Callable, Optional, Any
 import numpy as np
 
 from .batch_parameters import BatchParameters
-from .context import ContextStore, ComposableContextBuilder, FrameContext
+from .context import ContextStore, ComposableContextBuilder, FrameContext, Detection
 from .api_request_batcher import APIRequestBatcher, APIBatchRequest
 from .utils.video_utils import sample_interval_frames, calculate_motion_score
 from .prompting_protocols import get_prompting_protocol, ClassificationResult
@@ -23,6 +23,8 @@ def get_processing_strategy(name: str) -> Callable:
     if name not in PROCESSING_STRATEGY_REGISTRY:
         raise ValueError(f"Unknown processing strategy: {name}. Available: {list(PROCESSING_STRATEGY_REGISTRY.keys())}")
     return PROCESSING_STRATEGY_REGISTRY[name]
+
+
 
 # ==========================================
 # HELPER FUNCTIONS
@@ -145,7 +147,9 @@ def _classify_with_protocol(
     context_store: ContextStore,
     context_builder: ComposableContextBuilder,
     llm_service: Any,
-    batch_params: BatchParameters
+    batch_params: BatchParameters,
+    frame_cache: Optional[Dict[int, np.ndarray]] = None,
+    cv_service: Any = None
 ) -> ClassificationResult:
     """Helper to classify frames using the configured protocol"""
     protocol = get_prompting_protocol(batch_params.prompting_protocol.value)
@@ -159,12 +163,10 @@ def _classify_with_protocol(
         context_store=context_store,
         context_text=context_text,
         llm_service=llm_service,
-        batch_params=batch_params
+        batch_params=batch_params,
+        frame_cache=frame_cache,
+        cv_service=cv_service
     )
-
-# ==========================================
-# STRATEGIES
-# ==========================================
 
 @register_processing_strategy("classify_all")
 def strategy_classify_all(
@@ -175,7 +177,8 @@ def strategy_classify_all(
     api_batcher: APIRequestBatcher,
     llm_service,
     frame_cache: Dict[int, np.ndarray],
-    batch_params: BatchParameters
+    batch_params: BatchParameters,
+    cv_service: Any = None
 ) -> List[str]:
     """
     Current behavior: Classify every keyframe, then classify every interval.
@@ -185,7 +188,11 @@ def strategy_classify_all(
     total_api_calls = 0
     
     # 1. Classify Keyframes
+    prev_kf = 0
     for kf_number in keyframe_numbers:
+        # Lazy sampling is now handled inside the decision function if needed
+        prev_kf = kf_number
+
         frame = frame_cache.get(kf_number)
         if frame is None: continue 
         
@@ -198,7 +205,9 @@ def strategy_classify_all(
             context_store=context_store,
             context_builder=context_builder,
             llm_service=llm_service,
-            batch_params=batch_params
+            batch_params=batch_params,
+            frame_cache=frame_cache,
+            cv_service=cv_service
         )
         
         # Update context
@@ -209,6 +218,7 @@ def strategy_classify_all(
         total_api_calls += result.api_calls_used
         
         frame_labels[kf_number - 1] = result.action
+            
             
     # 2. Process Intervals
     for idx in range(len(keyframe_numbers) - 1):
@@ -234,7 +244,9 @@ def strategy_classify_all(
             context_store=context_store,
             context_builder=context_builder,
             llm_service=llm_service,
-            batch_params=batch_params
+            batch_params=batch_params,
+            frame_cache=frame_cache,
+            cv_service=cv_service
         )
         
         total_api_calls += result.api_calls_used
@@ -286,7 +298,8 @@ def strategy_keyframes_only(
     api_batcher: APIRequestBatcher,
     llm_service,
     frame_cache: Dict[int, np.ndarray],
-    batch_params: BatchParameters
+    batch_params: BatchParameters,
+    cv_service: Any = None
 ) -> List[str]:
     """
     Classify all keyframes. Interpolate intervals.
@@ -308,7 +321,9 @@ def strategy_keyframes_only(
             context_store=context_store,
             context_builder=context_builder,
             llm_service=llm_service,
-            batch_params=batch_params
+            batch_params=batch_params,
+            frame_cache=frame_cache,
+            cv_service=cv_service
         )
         
         # Update context
@@ -331,7 +346,8 @@ def strategy_smart(
     api_batcher: APIRequestBatcher,
     llm_service,
     frame_cache: Dict[int, np.ndarray],
-    batch_params: BatchParameters
+    batch_params: BatchParameters,
+    cv_service: Any = None
 ) -> List[str]:
     """
     Classify keyframes only when context changes significantly.
@@ -365,7 +381,9 @@ def strategy_smart(
             context_store=context_store,
             context_builder=context_builder,
             llm_service=llm_service,
-            batch_params=batch_params
+            batch_params=batch_params,
+            frame_cache=frame_cache,
+            cv_service=cv_service
         )
         
         # Update context
@@ -399,7 +417,8 @@ def strategy_keyframes_sampled(
     api_batcher: APIRequestBatcher,
     llm_service,
     frame_cache: Dict[int, np.ndarray],
-    batch_params: BatchParameters
+    batch_params: BatchParameters,
+    cv_service: Any = None
 ) -> List[str]:
     """
     Classify every Nth keyframe.
@@ -425,7 +444,9 @@ def strategy_keyframes_sampled(
             context_store=context_store,
             context_builder=context_builder,
             llm_service=llm_service,
-            batch_params=batch_params
+            batch_params=batch_params,
+            frame_cache=frame_cache,
+            cv_service=cv_service
         )
         
         # Update context

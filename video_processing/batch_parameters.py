@@ -111,6 +111,8 @@ class ObjectCheckMethod(str, Enum):
     LLM_WITH_CV_HINT = "llm_with_cv_hint"
     LLM_WITH_RELATIONSHIPS = "llm_with_relationships"
     LLM_STRICT = "llm_strict"
+    LLM_WITH_INTERVAL_AGGREGATION = "llm_with_interval_aggregation"
+    LLM_WITH_1SEC_AGGREGATION = "llm_with_1sec_aggregation"
     LEGACY_TESTING_CLASS = "legacy_testing_class"
     ACTION_MAPPING = "action_mapping"
 
@@ -203,7 +205,7 @@ class BatchParameters:
     
     num_frames_per_interval: int = 5
     include_neighbor_frames: bool = True
-    cv_detection_frequency: int = 5
+    cv_detection_frequency: int = 0
     enable_temporal_smoothing: bool = True
     temporal_smoothing_window: int = 9
     motion_score_threshold_idle: float = 0.16

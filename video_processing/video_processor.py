@@ -110,9 +110,13 @@ def _precompute_keyframe_contexts(
     """
     from .context import FrameContext, Detection
     
-    print(f"\nPhase 1: Pre-computing context for {len(keyframe_numbers)} keyframes...")
+    print(f"\nPhase 1: Pre-computing context...")
     
     actual_frame_count = len(frame_cache)
+    
+    # Determine which frames to process
+    # Only process keyframes (Original behavior)
+    print(f"  Processing {len(keyframe_numbers)} keyframes...")
     
     for kf_number in keyframe_numbers:
         frame = get_frame_from_cache(frame_cache, kf_number)
@@ -243,9 +247,9 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
         
         # Preload keyframes for faster access during classification
         if batch_params.preload_keyframes and keyframe_numbers:
-            print(f"Preloading {len(keyframe_numbers)} keyframes into cache...")
-            frame_cache.preload(keyframe_numbers)
-            print(f"Cache populated: {len(frame_cache._cache)}/{batch_params.frame_cache_size} frames")
+            print(f"Preloading {len(keyframe_numbers)} keyframes into cache (pinned)...")
+            frame_cache.pin(keyframe_numbers)
+            print(f"Cache populated: {len(frame_cache._cache)} LRU + {len(frame_cache._pinned)} pinned frames")
     
     # Use actual loaded frame count (not reported metadata count)
     actual_frame_count = len(frame_cache)
@@ -332,7 +336,8 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
         api_batcher=api_batcher,
         llm_service=llm_service,
         frame_cache=frame_cache,
-        batch_params=batch_params
+        batch_params=batch_params,
+        cv_service=cv_service
     )
     tracker.end_section("classification")
     

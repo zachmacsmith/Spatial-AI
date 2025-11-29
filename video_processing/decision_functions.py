@@ -6,68 +6,15 @@ from typing import List, Dict, Callable, Optional, Any
 from dataclasses import dataclass
 import numpy as np
 
-from .context import FrameContext, ContextStore
+from .context import FrameContext, ContextStore, Detection, DecisionContext
 from .batch_parameters import BatchParameters
 from .analysis.action_mapper import ActionMapper
+from .analysis.aggregation_helpers import ensure_cv_for_range, aggregate_detections
 
 # Instantiate global mapper
 ACTION_MAPPER = ActionMapper()
 
-@dataclass
-class DecisionContext:
-    """
-    All information available for making a decision.
-    Decision functions receive this and use whatever subset they need.
-    """
-    frames: List[np.ndarray]
-    frame_context: FrameContext
-    context_store: ContextStore
-    context_text: str
-    llm_service: Any
-    batch_params: BatchParameters
-    api_calls_used: int = 0
-    
-    def call_llm(self, prompt: str, max_tokens: int = 50, valid_options: Optional[List[str]] = None, log_label: str = "LLM Call") -> str:
-        """
-        Wrapper for LLM calls that tracks usage.
-        Increments self.api_calls_used.
-        Returns stripped response text.
-        """
-        self.api_calls_used += 1
-        
-        print(f"\n=== {log_label} ===")
-        print(f"LLM Prompt: {prompt}")
-        if valid_options:
-            print(f"Valid Options: {valid_options}")
-            
-        # Call LLM service
-        # We want to see the RAW response before validation for debugging
-        # But send_multiframe_prompt does validation internally.
-        # So we'll rely on the service to return the validated result,
-        # but we'll print it clearly.
-        
-        result = self.llm_service.send_multiframe_prompt(
-            frames=self.frames,
-            prompt_text=prompt,
-            max_tokens=max_tokens,
-            valid_options=valid_options
-        ).strip()
-        
-        print(f"LLM Response (Validated): {result}")
-        print("==================\n")
-        
-        return result
-        
-    def call_llm_no_image(self, prompt: str, max_tokens: int = 50, valid_options: Optional[List[str]] = None) -> str:
-        """
-        LLM call without sending images (cheaper).
-        For decisions that only need text context.
-        Increments self.api_calls_used.
-        """
-        # TODO: Implement text-only call if service supports it
-        # For now, just use same method but maybe empty frames? 
-        # Or just pass frames anyway since our interface requires them.
-        return self.call_llm(prompt, max_tokens, valid_options)
+
 
 # ==========================================
 # REGISTRIES
@@ -449,6 +396,126 @@ def object_check_strict(ctx: DecisionContext) -> str:
         f"Response:"
     )
     return ctx.call_llm(prompt, valid_options=options_list, log_label="Object Check (Strict)").lower().strip()
+
+
+@register_object_check("llm_with_interval_aggregation")
+def object_check_interval_aggregation(ctx: DecisionContext) -> str:
+    """
+    Aggregate detections since the last keyframe (or start of video).
+    """
+    current_frame = ctx.frame_context.frame_number
+    
+    # Find previous keyframe to define the interval
+    start_frame = 1
+    for f in range(current_frame - 1, 0, -1):
+        c = ctx.context_store.get(f)
+        if c and c.action:
+            start_frame = f
+            break
+            
+    end_frame = current_frame
+    
+    ensure_cv_for_range(ctx, start_frame, end_frame)
+    
+    # 1. Current Frame Detections
+    current_objects = []
+    if ctx.frame_context.detections:
+        # Filter ignored (allow hands in current frame to match context text)
+        ignored = {"person", "hardhat", "safety vest", "glove", "helmet", "vest", "face"}
+        for d in ctx.frame_context.detections:
+            if d.class_name.lower() not in ignored:
+                current_objects.append(f"{d.class_name} ({d.confidence:.2f})")
+    
+    current_hint = ", ".join(current_objects) if current_objects else "none"
+
+    # 2. Aggregated Detections (Previous Interval)
+    # We aggregate up to current_frame - 1 to separate past context
+    agg_end = max(start_frame, end_frame - 1)
+    if agg_end < start_frame:
+        # Interval is empty (start_frame == end_frame)
+        aggregated_scores = {}
+    else:
+        aggregated_scores = aggregate_detections(ctx, start_frame, agg_end)
+    
+    if aggregated_scores:
+        sorted_items = sorted(aggregated_scores.items(), key=lambda x: x[1], reverse=True)
+        agg_hint = ", ".join([f"{obj} ({score:.2f})" for obj, score in sorted_items])
+    else:
+        agg_hint = "none"
+    
+    options_list = ctx.batch_params.allowed_tools
+    options_str = ", ".join([f"'{opt}'" for opt in options_list])
+    
+    # Filter out redundant "Objects:" line from context_text
+    filtered_context = "\n".join([line for line in ctx.context_text.split('\n') if not line.strip().startswith("Objects:")])
+    
+    prompt = (
+        f"This is a POV of a construction worker using a tool.\n\n"
+        f"Objects in CURRENT frame: {current_hint}\n"
+        f"Objects in PREVIOUS interval: {agg_hint}\n\n"
+        f"{filtered_context}\n\n"
+        f"CRITICAL INSTRUCTION: Identify the tool being used.\n"
+        f"You must respond with EXACTLY ONE of the following words: {options_str}.\n"
+        f"Do NOT provide any reasoning, preamble, or extra text.\n"
+        f"If you are not 100% sure, or if the tool is not in the list, respond with 'unknown'.\n"
+        f"Response:"
+    )
+    return ctx.call_llm(prompt, valid_options=options_list, log_label="Object Check (Interval Agg)").lower().strip()
+
+@register_object_check("llm_with_1sec_aggregation")
+def object_check_1sec_aggregation(ctx: DecisionContext) -> str:
+    """
+    Aggregate detections over the past 1 second.
+    """
+    current_frame = ctx.frame_context.frame_number
+    fps = int(ctx.context_store.fps) if ctx.context_store.fps else 30
+    
+    start_frame = max(1, current_frame - fps)
+    end_frame = current_frame
+    
+    ensure_cv_for_range(ctx, start_frame, end_frame)
+    
+    # 1. Current Frame Detections
+    current_objects = []
+    if ctx.frame_context.detections:
+        ignored = {"person", "hardhat", "safety vest", "glove", "helmet", "vest", "face"}
+        for d in ctx.frame_context.detections:
+            if d.class_name.lower() not in ignored:
+                current_objects.append(f"{d.class_name} ({d.confidence:.2f})")
+    
+    current_hint = ", ".join(current_objects) if current_objects else "none"
+
+    # 2. Aggregated Detections (Previous Interval)
+    agg_end = max(start_frame, end_frame - 1)
+    if agg_end < start_frame:
+        aggregated_scores = {}
+    else:
+        aggregated_scores = aggregate_detections(ctx, start_frame, agg_end)
+    
+    if aggregated_scores:
+        sorted_items = sorted(aggregated_scores.items(), key=lambda x: x[1], reverse=True)
+        agg_hint = ", ".join([f"{obj} ({score:.2f})" for obj, score in sorted_items])
+    else:
+        agg_hint = "none"
+        
+    options_list = ctx.batch_params.allowed_tools
+    options_str = ", ".join([f"'{opt}'" for opt in options_list])
+    
+    # Filter out redundant "Objects:" line from context_text
+    filtered_context = "\n".join([line for line in ctx.context_text.split('\n') if not line.strip().startswith("Objects:")])
+    
+    prompt = (
+        f"This is a POV of a construction worker using a tool.\n\n"
+        f"Objects in CURRENT frame: {current_hint}\n"
+        f"Objects in PREVIOUS 1 second: {agg_hint}\n\n"
+        f"{filtered_context}\n\n"
+        f"CRITICAL INSTRUCTION: Identify the tool being used.\n"
+        f"You must respond with EXACTLY ONE of the following words: {options_str}.\n"
+        f"Do NOT provide any reasoning, preamble, or extra text.\n"
+        f"If you are not 100% sure, or if the tool is not in the list, respond with 'unknown'.\n"
+        f"Response:"
+    )
+    return ctx.call_llm(prompt, valid_options=options_list, log_label="Object Check (1s Agg)").lower().strip()
 
 @register_unknown_object_check("llm_guess_with_options")
 def unknown_check_options(ctx: DecisionContext) -> str:

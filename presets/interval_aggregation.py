@@ -1,0 +1,39 @@
+from video_processing import (
+    BatchParameters, 
+    PromptingProtocolType, 
+    StateCheckMethod, 
+    ObjectCheckMethod, 
+    UnknownObjectCheckMethod,
+    LLMProvider
+)
+
+def get_name() -> str:
+    return "Interval Aggregation"
+
+def get_description() -> str:
+    return "Aggregates object detections over the entire interval since the last keyframe."
+
+def get_batch_params() -> BatchParameters:
+    return BatchParameters(
+        config_name="interval_aggregation",
+        llm_provider=LLMProvider.CLAUDE,
+        llm_model="claude-sonnet-4-5-20250929",
+        prompting_protocol=PromptingProtocolType.CASCADE,
+        
+        # Standard State Check
+        state_check_method=StateCheckMethod.LEGACY_TESTING_CLASS,
+        
+        # Aggregated Object Detection
+        enable_object_detection=True,
+        object_check_method=ObjectCheckMethod.LLM_WITH_INTERVAL_AGGREGATION,
+        
+        # CRITICAL: Run CV on every frame so we have data to aggregate
+        cv_detection_frequency=5,
+        
+        # Temporal Majority for Unknowns
+        unknown_object_check_method=UnknownObjectCheckMethod.TEMPORAL_MAJORITY,
+        
+        # Enable Temporal Smoothing
+        enable_temporal_smoothing=True,
+        temporal_smoothing_window=9
+    )

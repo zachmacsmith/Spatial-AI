@@ -34,7 +34,9 @@ class PromptingProtocol:
         context_store: ContextStore,
         context_text: str,
         llm_service: Any,
-        batch_params: BatchParameters
+        batch_params: BatchParameters,
+        frame_cache: Optional[Dict[int, np.ndarray]] = None,
+        cv_service: Any = None
     ) -> ClassificationResult:
         """
         Perform classification using this protocol.
@@ -87,7 +89,9 @@ class SingleShotProtocol(PromptingProtocol):
         context_store: ContextStore,
         context_text: str,
         llm_service: Any,
-        batch_params: BatchParameters
+        batch_params: BatchParameters,
+        frame_cache: Optional[Dict[int, np.ndarray]] = None,
+        cv_service: Any = None
     ) -> ClassificationResult:
         
         actions_joined = ", ".join(batch_params.allowed_actions)
@@ -139,7 +143,9 @@ class CascadeProtocol(PromptingProtocol):
         context_store: ContextStore,
         context_text: str,
         llm_service: Any,
-        batch_params: BatchParameters
+        batch_params: BatchParameters,
+        frame_cache: Optional[Dict[int, np.ndarray]] = None,
+        cv_service: Any = None
     ) -> ClassificationResult:
         
         # 1. Build DecisionContext
@@ -149,7 +155,9 @@ class CascadeProtocol(PromptingProtocol):
             context_store=context_store,
             context_text=context_text,
             llm_service=llm_service,
-            batch_params=batch_params
+            batch_params=batch_params,
+            frame_cache=frame_cache,
+            cv_service=cv_service
         )
         
         # 2. Get configured decision functions from registries
