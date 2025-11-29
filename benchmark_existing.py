@@ -6,6 +6,7 @@ Run benchmarks on previously processed batches without re-processing videos.
 import os
 import sys
 from pathlib import Path
+from datetime import datetime
 
 def find_batch_folders():
     """Find all batch folders in outputs/data/"""
@@ -65,26 +66,33 @@ def main():
     if choice == 'all':
         batches_to_benchmark = batch_folders
     else:
+        # Support comma-separated list
         try:
-            idx = int(choice) - 1
-            if 0 <= idx < len(batch_folders):
-                batches_to_benchmark = [batch_folders[idx]]
-            else:
-                print(f"Invalid selection: {choice}")
-                return
+            indices = [int(x.strip()) - 1 for x in choice.split(',')]
+            for idx in indices:
+                if 0 <= idx < len(batch_folders):
+                    batches_to_benchmark.append(batch_folders[idx])
+                else:
+                    print(f"⚠ Invalid index ignored: {idx + 1}")
         except ValueError:
             print(f"Invalid input: {choice}")
             return
+            
+    if not batches_to_benchmark:
+        print("No valid batches selected.")
+        return
     
     # Import benchmark function (only after user has made selection)
     try:
-        from post_processing.accuracy_benchmark import run_benchmark
+        from post_processing.accuracy_benchmark import run_benchmark, generate_comparison_charts
     except ImportError as e:
         print(f"❌ Error importing benchmark: {e}")
         print("Make sure seaborn is installed: pip install seaborn")
         return
     
     # Benchmark each selected batch
+    all_benchmark_results = []
+    
     for batch_folder in batches_to_benchmark:
         batch_id = batch_folder.name
         videos = get_videos_from_batch(batch_folder)
@@ -98,7 +106,6 @@ def main():
         print(f"Videos: {', '.join(videos)}")
         print("=" * 70)
         
-        # Get batch metadata
         # Get batch metadata
         batch_name = batch_id
         model_version = "unknown"
@@ -129,7 +136,7 @@ def main():
         
         # Run benchmark
         try:
-            run_benchmark(
+            result = run_benchmark(
                 videos_to_process=videos,
                 batch_name=batch_name,
                 model_version=model_version,
@@ -137,9 +144,26 @@ def main():
                 model_data_dir=str(batch_folder) + "/",
                 batch_id=batch_id
             )
-            print(f"\n✓ Benchmark complete for {batch_id}")
+            if result:
+                all_benchmark_results.append(result)
+                print(f"\n✓ Benchmark complete for {batch_id}")
         except Exception as e:
             print(f"\n❌ Error benchmarking {batch_id}: {e}")
+            import traceback
+            traceback.print_exc()
+            
+    # Generate Comparison Charts if multiple batches processed
+    if len(all_benchmark_results) > 1:
+        print("\n" + "=" * 70)
+        print("GENERATING COMPARISON CHARTS")
+        print("=" * 70)
+        
+        comparison_dir = "benchmark_results/comparisons/" + datetime.now().strftime("%Y%m%d_%H%M%S")
+        try:
+            generate_comparison_charts(all_benchmark_results, comparison_dir)
+            print(f"\n✓ Comparison charts saved to: {comparison_dir}")
+        except Exception as e:
+            print(f"❌ Error generating comparison charts: {e}")
             import traceback
             traceback.print_exc()
 

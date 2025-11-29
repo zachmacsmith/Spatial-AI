@@ -425,28 +425,14 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
                 )
                 relationship_tracker.update(relationships, frame_num)
             
-            # Refine "using tool" label with detected object
+            # Refine "using tool" label with stored tool info
+            # STRICTLY use context_store data (Single Source of Truth)
             display_label = frame_labels[i]
+            
             if display_label == "using tool":
-                tool_name = "unknown"
-                if current_yolo_results:
-                    # Filter out non-tool objects
-                    ignored_objects = {"person", "hand", "hardhat", "safety vest", "glove", "helmet", "vest", "face"}
-                    detected_tools = []
-                    
-                    if hasattr(current_yolo_results, 'boxes'):
-                        for cls_id, conf in zip(current_yolo_results.boxes.cls, current_yolo_results.boxes.conf):
-                            name = current_yolo_results.names[int(cls_id)]
-                            if name not in ignored_objects:
-                                detected_tools.append((name, float(conf)))
-                    
-                    if detected_tools:
-                        # Sort by confidence
-                        detected_tools.sort(key=lambda x: x[1], reverse=True)
-                        tool_name = detected_tools[0][0]
-                        display_label = f"using + {tool_name}"
-                    else:
-                        display_label = "using unknown"
+                ctx = context_store.get(frame_num)
+                if ctx and ctx.tool and ctx.tool != "unknown":
+                    display_label = f"using + {ctx.tool}"
                 else:
                     display_label = "using unknown"
 

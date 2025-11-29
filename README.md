@@ -505,6 +505,7 @@ The system's YOLO model (`weights.pt`) is trained to detect the following 11 cla
 | 8 | safety vest |
 | 9 | saw |
 | 10 | tape |
+| 11 | hammer |
 
 ---
 

@@ -109,6 +109,8 @@ class ObjectCheckMethod(str, Enum):
     LLM_DIRECT = "llm_direct"
     CV_THEN_LLM = "cv_then_llm"
     LLM_WITH_CV_HINT = "llm_with_cv_hint"
+    LLM_WITH_RELATIONSHIPS = "llm_with_relationships"
+    LLM_STRICT = "llm_strict"
     LEGACY_TESTING_CLASS = "legacy_testing_class"
     ACTION_MAPPING = "action_mapping"
 
@@ -190,7 +192,7 @@ class BatchParameters:
     allowed_actions: List[str] = field(default_factory=lambda: ["using tool", "idle", "moving"])
     tool_detection_method: ToolDetectionMethod = ToolDetectionMethod.CV_INFERENCE
     allowed_tools: List[str] = field(default_factory=lambda: [
-        "brick trowel", "caulk gun", "drill", "pencil", "saw", "brick", "measuring", "unknown"
+        "brick trowel", "caulk gun", "drill", "pencil", "saw", "brick", "measuring", "hammer", "unknown"
     ])
     enable_relationship_tracking: bool = True
     proximity_threshold_percent: float = 0.18

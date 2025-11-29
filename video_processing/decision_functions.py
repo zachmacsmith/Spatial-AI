@@ -36,7 +36,7 @@ class DecisionContext:
         self.api_calls_used += 1
         
         print(f"\n=== {log_label} ===")
-        print(f"LLM Prompt: {prompt[:100]}...")
+        print(f"LLM Prompt: {prompt}")
         if valid_options:
             print(f"Valid Options: {valid_options}")
             
@@ -359,6 +359,40 @@ def object_check_llm_hint(ctx: DecisionContext) -> str:
     )
     return ctx.call_llm(prompt, valid_options=ctx.batch_params.allowed_tools, log_label="Object Check (Hint)").lower().strip()
 
+@register_object_check("llm_with_relationships")
+def object_check_llm_relationships(ctx: DecisionContext) -> str:
+    """
+    Ask LLM, providing CV detections AND relationship context.
+    1 API call.
+    """
+    # 1. Get CV detections
+    ignored = {"person", "hand", "hardhat", "safety vest", "glove", "helmet", "vest", "face"}
+    tools = [d.class_name for d in ctx.frame_context.detections if d.class_name not in ignored]
+    hint = ", ".join(tools) if tools else "none"
+    
+    # 2. Get Relationships
+    relationships_text = "none"
+    if ctx.frame_context.relationships:
+        rel_strings = []
+        for rel_set in ctx.frame_context.relationships:
+            # rel_set is a frozenset of object names
+            items = list(rel_set)
+            if len(items) >= 2:
+                rel_strings.append(f"{items[0]} is close to {items[1]}")
+        
+        if rel_strings:
+            relationships_text = "; ".join(rel_strings)
+    
+    prompt = (
+        f"This is a POV of a construction worker using a tool.\n\n"
+        f"Object detection suggests: {hint}\n"
+        f"Spatial relationships detected: {relationships_text}\n\n"
+        f"{ctx.context_text}\n\n"
+        f"What tool are they using? Consider the spatial relationships (e.g., hand close to tool).\n"
+        f"Respond with the tool name only."
+    )
+    return ctx.call_llm(prompt, valid_options=ctx.batch_params.allowed_tools, log_label="Object Check (Relationships)").lower().strip()
+
 @register_object_check("legacy_testing_class")
 def object_check_legacy(ctx: DecisionContext) -> str:
     """
@@ -389,6 +423,32 @@ def unknown_check_llm(ctx: DecisionContext) -> str:
         f"What tool or object are they using? Be specific (1-4 words)."
     )
     return ctx.call_llm(prompt, log_label="Unknown Check (Guess)").lower().strip()
+
+@register_object_check("llm_strict")
+def object_check_strict(ctx: DecisionContext) -> str:
+    """
+    Ask LLM with extremely strict constraints.
+    1 API call.
+    """
+    # 1. Get CV detections for context (optional, but helpful)
+    ignored = {"person", "hand", "hardhat", "safety vest", "glove", "helmet", "vest", "face"}
+    tools = [d.class_name for d in ctx.frame_context.detections if d.class_name not in ignored]
+    hint = ", ".join(tools) if tools else "none"
+    
+    options_list = ctx.batch_params.allowed_tools
+    options_str = ", ".join([f"'{opt}'" for opt in options_list])
+    
+    prompt = (
+        f"This is a POV of a construction worker using a tool.\n\n"
+        f"Object detection suggests: {hint}\n\n"
+        f"{ctx.context_text}\n\n"
+        f"CRITICAL INSTRUCTION: Identify the tool being used.\n"
+        f"You must respond with EXACTLY ONE of the following words: {options_str}.\n"
+        f"Do NOT provide any reasoning, preamble, or extra text.\n"
+        f"If you are not 100% sure, or if the tool is not in the list, respond with 'unknown'.\n"
+        f"Response:"
+    )
+    return ctx.call_llm(prompt, valid_options=options_list, log_label="Object Check (Strict)").lower().strip()
 
 @register_unknown_object_check("llm_guess_with_options")
 def unknown_check_options(ctx: DecisionContext) -> str:

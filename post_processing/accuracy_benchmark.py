@@ -496,6 +496,147 @@ def generate_accuracy_charts(results_df, output_dir):
     
     return chart_paths
 
+def generate_comparison_charts(results_list, output_dir):
+    """
+    Generate comparison charts for multiple batches.
+    
+    Args:
+        results_list: List of result dictionaries from run_benchmark
+        output_dir: Directory to save comparison charts
+    """
+    if not results_list:
+        print("No results to compare")
+        return []
+        
+    os.makedirs(output_dir, exist_ok=True)
+    chart_paths = []
+    
+    # Prepare data for plotting
+    data = []
+    for res in results_list:
+        batch_name = res.get('batch_id', 'Unknown')
+        
+        # Construct label: "ConfigName (Note)"
+        label = batch_name
+        if res.get('batch_params'):
+            label = res['batch_params'].config_name
+            
+        # Add note if present
+        note = res.get('notes', '')
+        if note:
+            label = f"{label} ({note})"
+            
+        # Store label in result for reuse
+        res['label'] = label
+            
+        data.append({
+            'Batch': label,
+            'Batch ID': batch_name,
+            'State Accuracy': res['avg_state_accuracy'],
+            'Object Accuracy': res['avg_object_accuracy'] if res['avg_object_accuracy'] is not None else 0,
+            'Guess Accuracy': res.get('avg_guess_accuracy', 0) if res.get('avg_guess_accuracy') is not None else 0
+        })
+        
+    df = pd.DataFrame(data)
+    
+    # Save comparison CSV
+    csv_path = os.path.join(output_dir, "batch_comparison.csv")
+    df.to_csv(csv_path, index=False)
+    print(f"✓ Comparison CSV saved to: {csv_path}")
+    
+    # Set style
+    sns.set_style("whitegrid")
+    plt.rcParams['figure.facecolor'] = 'white'
+    
+    # Chart 1: Comparative Accuracy
+    fig, ax = plt.subplots(figsize=(12, 8))
+    
+    # Melt for grouped bar chart
+    df_melted = df.melt(id_vars=['Batch', 'Batch ID'], 
+                        value_vars=['State Accuracy', 'Object Accuracy', 'Guess Accuracy'],
+                        var_name='Metric', value_name='Accuracy')
+    
+    # Plot
+    sns.barplot(data=df_melted, x='Batch', y='Accuracy', hue='Metric', ax=ax, palette='viridis', edgecolor='black')
+    
+    ax.set_title('Batch Comparison: Average Accuracy', fontsize=16, fontweight='bold')
+    ax.set_ylabel('Accuracy', fontsize=12, fontweight='bold')
+    ax.set_xlabel('Batch', fontsize=12, fontweight='bold')
+    ax.set_ylim(0, 1)
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f'{y:.0%}'))
+    plt.xticks(rotation=45, ha='right')
+    plt.legend(title='Metric')
+    
+    # Add value labels
+    for container in ax.containers:
+        ax.bar_label(container, fmt='%.1f%%', padding=3)
+        
+    plt.tight_layout()
+    chart1_path = os.path.join(output_dir, 'batch_comparison_accuracy.png')
+    plt.savefig(chart1_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    chart_paths.append(chart1_path)
+    
+    # ---------------------------------------------------------
+    # NEW: Per-Video Comparison Charts
+    # ---------------------------------------------------------
+    
+    # Collect per-video data
+    video_data = []
+    for res in results_list:
+        batch_label = res.get('label', res.get('batch_id', 'Unknown'))
+        
+        if 'per_video_results' in res:
+            for vid_name, vid_res in res['per_video_results'].items():
+                video_data.append({
+                    'Video': vid_name,
+                    'Batch': batch_label,
+                    'State Accuracy': vid_res['state_accuracy'],
+                    'Object Accuracy': vid_res['object_accuracy'] if vid_res['object_accuracy'] is not None else 0
+                })
+    
+    if video_data:
+        df_video = pd.DataFrame(video_data)
+        
+        # Chart 2: Per-Video State Accuracy
+        fig, ax = plt.subplots(figsize=(14, 8))
+        sns.barplot(data=df_video, x='Video', y='State Accuracy', hue='Batch', ax=ax, palette='viridis', edgecolor='black')
+        
+        ax.set_title('Per-Video State Accuracy Comparison', fontsize=16, fontweight='bold')
+        ax.set_ylabel('Accuracy', fontsize=12, fontweight='bold')
+        ax.set_xlabel('Video', fontsize=12, fontweight='bold')
+        ax.set_ylim(0, 1)
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f'{y:.0%}'))
+        plt.xticks(rotation=45, ha='right')
+        plt.legend(title='Batch', bbox_to_anchor=(1.05, 1), loc='upper left')
+        
+        plt.tight_layout()
+        chart2_path = os.path.join(output_dir, 'comparison_by_video_state.png')
+        plt.savefig(chart2_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        chart_paths.append(chart2_path)
+        
+        # Chart 3: Per-Video Object Accuracy
+        fig, ax = plt.subplots(figsize=(14, 8))
+        sns.barplot(data=df_video, x='Video', y='Object Accuracy', hue='Batch', ax=ax, palette='viridis', edgecolor='black')
+        
+        ax.set_title('Per-Video Object Accuracy Comparison', fontsize=16, fontweight='bold')
+        ax.set_ylabel('Accuracy', fontsize=12, fontweight='bold')
+        ax.set_xlabel('Video', fontsize=12, fontweight='bold')
+        ax.set_ylim(0, 1)
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f'{y:.0%}'))
+        plt.xticks(rotation=45, ha='right')
+        plt.legend(title='Batch', bbox_to_anchor=(1.05, 1), loc='upper left')
+        
+        plt.tight_layout()
+        chart3_path = os.path.join(output_dir, 'comparison_by_video_object.png')
+        plt.savefig(chart3_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        chart_paths.append(chart3_path)
+    
+    print(f"✓ Generated comparison charts in: {output_dir}")
+    return chart_paths
+
 # ----------------------------
 # Main benchmark function
 # ----------------------------
@@ -745,7 +886,9 @@ def run_benchmark(videos_to_process, batch_name, model_version, notes="", model_
         'results_path': results_path,
         'batch_id': batch_id,
         'batch_params': batch_params,  # Include loaded BatchParameters
-        'charts': chart_paths  # Add chart paths
+        'charts': chart_paths,  # Add chart paths
+        'per_video_results': all_results, # Return detailed results for comparison
+        'notes': notes
     }
 
 # ----------------------------
