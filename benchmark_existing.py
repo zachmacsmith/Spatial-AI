@@ -23,212 +23,139 @@ def get_videos_from_batch(batch_folder):
     videos = set()
     for file in batch_folder.glob("*.csv"):
         if not file.name.endswith("_metadata.json") and not file.name.endswith("_relationships.csv"):
-            # Extract video name from filename (e.g., "video_01.csv" -> "video_01")
             video_name = file.stem
             videos.add(video_name)
     return sorted(videos)
 
 def get_batch_note(batch_folder):
-    """
-    Get the description/note for a batch.
-    Tries to read from batch_tracking json first, then readme.txt.
-    """
+    """Get the description/note for a batch."""
     import json
-    
-    # Try batch tracking JSON
     try:
         tracking_path = Path("outputs/batch_tracking") / f"{batch_folder.name}.json"
         if tracking_path.exists():
             with open(tracking_path, 'r') as f:
                 config = json.load(f)
-                if 'config_description' in config and config['config_description']:
-                    return config['config_description']
-    except:
-        pass
-        
-    # Try readme.txt
+                if 'config_description' in config: return config['config_description']
+    except: pass
     try:
         readme_path = batch_folder / "readme.txt"
         if readme_path.exists():
             with open(readme_path, 'r') as f:
                 for line in f:
-                    if line.startswith("Note:"):
-                        return line.replace("Note:", "").strip()
-    except:
-        pass
-        
+                    if line.startswith("Note:"): return line.replace("Note:", "").strip()
+    except: pass
     return ""
 
 def main():
-    print("=" * 70)
-    print("BENCHMARK EXISTING BATCHES")
-    print("=" * 70)
-    print()
+    print("=" * 70); print("BENCHMARK EXISTING BATCHES"); print("=" * 70); print()
     
-    # Find all batch folders
     batch_folders = find_batch_folders()
-    
-    if not batch_folders:
-        print("No batch folders found in outputs/data/")
-        return
+    if not batch_folders: print("No batch folders found."); return
     
     print(f"Found {len(batch_folders)} batch folders:\n")
-    print(f"Found {len(batch_folders)} batch folders:\n")
-    
-    # Print in reverse order (1 at the bottom = Newest)
     for i in range(len(batch_folders) - 1, -1, -1):
         folder = batch_folders[i]
-        videos = get_videos_from_batch(folder)
         note = get_batch_note(folder)
-        
         note_str = f" - {note}" if note else ""
         print(f"{i+1}. {folder.name}{note_str}")
-        print(f"   Videos: {', '.join(videos) if videos else 'None'}")
-        print()
-    
-    # Let user select batch(es)
-    print("Options:")
-    print("  - Enter batch number (e.g., '1')")
-    print("  - Enter 'all' to benchmark all batches")
-    print("  - Enter 'q' to quit")
-    print()
-    
+        
+    print("\nOptions: Number, 'all', or 'q'")
     choice = input("Select batch: ").strip().lower()
-    
-    if choice == 'q':
-        print("Cancelled.")
-        return
+    if choice == 'q': return
     
     batches_to_benchmark = []
-    
-    if choice == 'all':
-        batches_to_benchmark = batch_folders
+    if choice == 'all': batches_to_benchmark = batch_folders
     else:
-        # Support comma-separated list
         try:
             indices = [int(x.strip()) - 1 for x in choice.split(',')]
             for idx in indices:
-                if 0 <= idx < len(batch_folders):
-                    batches_to_benchmark.append(batch_folders[idx])
-                else:
-                    print(f"⚠ Invalid index ignored: {idx + 1}")
-        except ValueError:
-            print(f"Invalid input: {choice}")
-            return
-            
-    if not batches_to_benchmark:
-        print("No valid batches selected.")
-        return
+                if 0 <= idx < len(batch_folders): batches_to_benchmark.append(batch_folders[idx])
+        except: print("Invalid input"); return
+
+    if not batches_to_benchmark: return
+
+    # --- NEW: Metric Selection ---
+    print("\nSelect Accuracy Measure:")
+    print("  1 - Traditional (Standard Accuracy)")
+    print("  2 - F1-Weighted (Macro F1 Score - Recommended for Imbalanced Data)")
+    metric_choice = input("Select option (1/2): ").strip()
     
-    # Ask for performance analysis options
+    metric_mode = "traditional"
+    if metric_choice == '2':
+        metric_mode = "f1_weighted"
+        print(">> Selected: F1-Weighted Mode")
+    else:
+        print(">> Selected: Traditional Accuracy Mode")
+    
     print("\nPerformance Analysis:")
-    print("  0 - None (Skip performance charts)")
-    print("  1 - Averages Only (Summary tables/charts)")
-    print("  2 - Full Breakdown (Per-video charts + Averages)")
-    print("  3 - Over/Under Analysis (Includes Full Breakdown)")
-    perf_choice = input("Select option (0/1/2/3): ").strip()
+    print("  0 - None"); print("  1 - Averages Only"); print("  2 - Full Breakdown"); print("  3 - Over/Under Analysis")
+    perf_choice = input("Select option: ").strip()
     
     performance_mode = "none"
     generate_over_under = False
-    if perf_choice == '1':
-        performance_mode = "averages"
-    elif perf_choice == '2':
+    if perf_choice == '1': performance_mode = "averages"
+    elif perf_choice in ['2', '3']: 
         performance_mode = "full"
-    elif perf_choice == '3':
-        performance_mode = "full"
-        generate_over_under = True
+        if perf_choice == '3': generate_over_under = True
         
-    # Import benchmark function (only after user has made selection)
     try:
         from post_processing.accuracy_benchmark import run_benchmark, generate_comparison_charts, generate_performance_comparison_charts
     except ImportError as e:
-        print(f"❌ Error importing benchmark: {e}")
-        print("Make sure seaborn is installed: pip install seaborn")
-        return
+        print(f"❌ Error importing benchmark: {e}"); return
     
-    # Benchmark each selected batch
     all_benchmark_results = []
     
     for batch_folder in batches_to_benchmark:
         batch_id = batch_folder.name
         videos = get_videos_from_batch(batch_folder)
+        if not videos: continue
         
-        if not videos:
-            print(f"\n⚠ Skipping {batch_id} - no videos found")
-            continue
-        
-        print("\n" + "=" * 70)
-        print(f"Benchmarking: {batch_id}")
-        print(f"Videos: {', '.join(videos)}")
-        print("=" * 70)
-        
-        # Get batch metadata
-        batch_name = batch_id
+        # Get metadata
         model_version = "unknown"
         notes = ""
-        
-        # Try to load from batch tracking
         try:
             import json
             tracking_path = Path("outputs/batch_tracking") / f"{batch_id}.json"
             if tracking_path.exists():
                 with open(tracking_path, 'r') as f:
                     config = json.load(f)
-                    if 'llm_model' in config:
-                        model_version = config['llm_model']
-                        print(f"✓ Detected model version: {model_version}")
-                    if 'config_description' in config:
-                        notes = config['config_description']
-            else:
-                print(f"⚠ No batch config found at {tracking_path}")
-        except Exception as e:
-            print(f"⚠ Error loading batch config: {e}")
+                    if 'llm_model' in config: model_version = config['llm_model']
+                    if 'config_description' in config: notes = config['config_description']
+        except: pass
 
-        print(f"Batch Name: {batch_name}")
-        print(f"Model Version: {model_version}")
-        if notes:
-            print(f"Notes: {notes}")
-
+        print("\n" + "=" * 70)
+        print(f"Benchmarking: {batch_id} ({metric_mode})")
+        print("=" * 70)
         
-        # Run benchmark
         try:
             result = run_benchmark(
                 videos_to_process=videos,
-                batch_name=batch_name,
+                batch_name=batch_id,
                 model_version=model_version,
                 notes=notes,
                 model_data_dir=str(batch_folder) + "/",
                 batch_id=batch_id,
                 performance_mode=performance_mode,
-                generate_over_under=generate_over_under
+                generate_over_under=generate_over_under,
+                metric_mode=metric_mode # <--- Pass the mode
             )
-            if result:
-                all_benchmark_results.append(result)
-                print(f"\n✓ Benchmark complete for {batch_id}")
+            if result: all_benchmark_results.append(result)
         except Exception as e:
-            print(f"\n❌ Error benchmarking {batch_id}: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"❌ Error: {e}")
+            import traceback; traceback.print_exc()
             
-    # Generate Comparison Charts if multiple batches processed
     if len(all_benchmark_results) > 1:
-        print("\n" + "=" * 70)
-        print("GENERATING COMPARISON CHARTS")
-        print("=" * 70)
+        print("\n" + "=" * 70); print("GENERATING COMPARISON CHARTS"); print("=" * 70)
+        # Separate output folder for F1 comparisons
+        base = "benchmark_results_f1" if metric_mode == "f1_weighted" else "benchmark_results"
+        comp_dir = f"{base}/comparisons/{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
-        comparison_dir = "benchmark_results/comparisons/" + datetime.now().strftime("%Y%m%d_%H%M%S")
         try:
-            generate_comparison_charts(all_benchmark_results, comparison_dir)
-            print(f"\n✓ Comparison charts saved to: {comparison_dir}")
-            
+            generate_comparison_charts(all_benchmark_results, comp_dir, metric_label=all_benchmark_results[0]['metric_label'])
+            print(f"\n✓ Comparison charts saved to: {comp_dir}")
             if performance_mode != "none":
-                generate_performance_comparison_charts(all_benchmark_results, comparison_dir)
-                print(f"✓ Performance comparison charts saved to: {comparison_dir}")
-                
-        except Exception as e:
-            print(f"❌ Error generating comparison charts: {e}")
-            import traceback
-            traceback.print_exc()
+                generate_performance_comparison_charts(all_benchmark_results, comp_dir)
+        except Exception as e: print(f"❌ Error: {e}")
 
 if __name__ == "__main__":
     main()

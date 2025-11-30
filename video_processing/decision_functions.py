@@ -1055,3 +1055,32 @@ def unknown_check_skip(ctx: DecisionContext) -> str:
     0 API calls.
     """
     return ""
+
+# ==========================================
+# BASELINE CHECKS (RANDOM & STATIC)
+# ==========================================
+
+@register_state_check("random")
+def state_check_random(ctx: DecisionContext) -> str:
+    """Randomly guess state from allowed actions."""
+    import random
+    return random.choice(ctx.batch_params.allowed_actions)
+
+@register_object_check("random")
+def object_check_random(ctx: DecisionContext) -> str:
+    """Randomly guess tool from allowed tools."""
+    import random
+    return random.choice(ctx.batch_params.allowed_tools)
+
+@register_state_check("static_using_tool")
+def state_check_static_working(ctx: DecisionContext) -> str:
+    """Always guess 'using tool' (likely the majority class)."""
+    return "using tool"
+
+@register_object_check("static_common")
+def object_check_static_common(ctx: DecisionContext) -> str:
+    """
+    Always guess the most common tool. 
+    EDIT THIS STRING to match your dataset's most frequent tool (e.g. 'drill', 'hammer').
+    """
+    return "measuring" 

@@ -103,6 +103,8 @@ class StateCheckMethod(str, Enum):
     LEGACY_SOFTENED = "legacy_softened"
     LLM_MULTIFRAME = "llm_multiframe"
     CV_OBJECTS_ONLY = "cv_objects_only"
+    RANDOM = "random"
+    STATIC_USING_TOOL = "static_using_tool"
 
 
 class ObjectCheckMethod(str, Enum):
@@ -123,6 +125,8 @@ class ObjectCheckMethod(str, Enum):
     LEGACY_SOFTENED = "legacy_softened"
     ACTION_MAPPING = "action_mapping"
     LLM_MULTIFRAME = "llm_multiframe"
+    RANDOM = "random"
+    STATIC_COMMON = "static_common"
 
 
 class UnknownObjectCheckMethod(str, Enum):

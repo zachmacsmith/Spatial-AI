@@ -89,6 +89,8 @@ It demonstrates:
 The system comes with several tuned presets:
 
 - **Legacy + Temporal Majority** (`legacy_temporal`): **(Recommended)** Replicates the original logic but uses temporal majority voting to identify unknown objects.
+- **Power Saw Recheck (Haiku)** (`power_saw_recheck_haiku`): **(New)** Specialized for power saws. Uses a two-step recheck process: strict initial check, followed by a multiframe aggregation recheck if unknown.
+- **Power Saw Strict (Haiku)** (`power_saw_haiku`): Strict object detection with aggregation, optimized for power saws.
 - **Legacy** (`legacy`): Exact replication of the original `TestingClass.py` logic.
 - **Balanced** (`balanced`): Hybrid approach using Motion/CV first, falling back to LLM. Good trade-off.
 - **Thorough** (`thorough`): Maximum accuracy using LLM for all decisions. High cost.

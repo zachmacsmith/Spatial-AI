@@ -23,6 +23,7 @@ The system is controlled by `BatchParameters` in `video_processing/batch_paramet
 1.  **AI Models**: `llm_provider`, `llm_model`, `cv_model`
 2.  **Prompt Engineering**: `prompt_template`, `prompting_protocol`
 3.  **Decision Logic**: `state_check_method`, `object_check_method`, `unknown_object_check_method`
+    *   New methods: `LLM_TWO_STEP_RECHECK`, `LLM_STRICT_CONFIDENT`, `LEGACY_SOFTENED`
 4.  **Analysis Methods**: `action_classification_method`, `tool_detection_method`
 5.  **Processing**: `processing_strategy`, `num_frames_per_interval`
 6.  **Output**: `generate_labeled_video`, `save_actions_csv`

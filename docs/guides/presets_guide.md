@@ -104,3 +104,49 @@ These presets replicate the configurations from the original `TestingClass*.py` 
 *   **Preset ID:** `full_analysis`
 *   **Equivalent:** `TestingClassFINAL.py`
 *   **Features:** Full suite including static charts and productivity analysis.
+
+---
+
+## 🛠️ Specialized & New Presets
+
+### 13. Legacy + Temporal Majority
+*   **Preset ID:** `legacy_temporal`
+*   **Description:** Replicates the original logic but uses temporal majority voting to identify unknown objects.
+*   **Best For:** General purpose baseline with improved stability.
+
+### 14. Enhanced Temporal
+*   **Preset ID:** `enhanced_temporal`
+*   **Description:** Uses CV-first logic with temporal majority voting and smart classification.
+*   **Best For:** Efficiency and stability.
+
+### 15. Strict Enhanced
+*   **Preset ID:** `strict_enhanced`
+*   **Description:** Enhanced temporal logic with strict prompting constraints (no reasoning, exact option match only).
+*   **Best For:** Reducing hallucinations.
+
+### 16. Relationship Aware
+*   **Preset ID:** `relationship_aware`
+*   **Description:** Uses LLM with relationship context for object identification.
+*   **Best For:** Complex scenes where object interaction matters.
+
+### 17. Power Saw Strict (Haiku)
+*   **Preset ID:** `power_saw_haiku`
+*   **Description:** Strict object detection with aggregation, optimized for power saws using Claude 3 Haiku.
+*   **Features:** "Power saw" in tool list, softened uncertainty prompt, aggregation.
+
+### 18. Power Saw Recheck (Haiku)
+*   **Preset ID:** `power_saw_recheck_haiku`
+*   **Description:** Specialized for power saws. Uses a two-step recheck process:
+    1.  Strict initial check on current frame.
+    2.  If "unknown", triggers a recheck using 2 seconds of aggregated object identification and multiframe visual context (10 frames).
+*   **Best For:** High accuracy on difficult-to-detect tools like power saws.
+
+### 19. Raw LLM (Sonnet)
+*   **Preset ID:** `raw_llm_sonnet`
+*   **Description:** Direct LLM calls for state and object check, bypassing most heuristics.
+*   **Best For:** Testing raw model capabilities.
+
+### 20. Dense Interval Aggregation
+*   **Preset ID:** `dense_interval_aggregation`
+*   **Description:** Uses dense keyframe sampling (every 5 frames) for high-resolution interval aggregation.
+*   **Best For:** Capturing rapid changes.
