@@ -312,6 +312,9 @@ def main():
                             # Check for partial failures (e.g. video generation failed but data saved)
                             if "video_error" in res["output"]:
                                 f.write(f"  ⚠ Video Generation Failed: {res['output']['video_error']}\n")
+                            if "warnings" in res["output"] and res["output"]["warnings"]:
+                                for w in res["output"]["warnings"]:
+                                    f.write(f"  ⚠ {w}\n")
                         
                 print(f"\n✓ Created batch README at: {readme_path}")
 

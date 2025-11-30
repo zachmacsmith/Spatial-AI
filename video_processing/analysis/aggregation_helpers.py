@@ -18,39 +18,69 @@ def ensure_cv_for_range(ctx: DecisionContext, start_frame: int, end_frame: int):
         return
 
     # Determine frames to check
-    frames_to_check = list(range(start_frame, end_frame, freq))
+    frames_to_check_for_cv = list(range(start_frame, end_frame, freq))
     
     # Always check the end_frame (current keyframe) if not covered
-    if end_frame not in frames_to_check:
-        frames_to_check.append(end_frame)
-        
-    for frame_num in frames_to_check:
-        # Check if context already exists and has detections
-        c = ctx.context_store.get(frame_num)
-        if c and c.detections is not None:
+    if end_frame not in frames_to_check_for_cv:
+        frames_to_check_for_cv.append(end_frame)
+    
+    # print(f"[DEBUG] ensure_cv_for_range: Checking {start_frame}-{end_frame}. Frames to CV: {frames_to_check_for_cv}")
+    
+    for frame_num in range(start_frame, end_frame + 1):
+        # Only run CV for frames specified by frequency
+        if frame_num not in frames_to_check_for_cv:
             continue
 
+        # Skip if already processed (e.g., if frame_num is a keyframe)
+        c = ctx.context_store.get(frame_num) # Get context here to use it below
+        if c:
+            # Check if it has detections
+            if c.detections:
+                # print(f"[DEBUG] Frame {frame_num} skipped (already has {len(c.detections)} detections)")
+                continue
+            elif c.raw_results:
+                 # print(f"[DEBUG] Frame {frame_num} skipped (has raw_results but 0 detections)")
+                 continue
+            else:
+                 # print(f"[DEBUG] Frame {frame_num} in store but NO detections/raw_results. Re-running CV.")
+                 # Force re-run
+                 pass
+            
         # Load frame
         try:
             frame = ctx.frame_cache.get(frame_num)
             if frame is None:
+                # print(f"[DEBUG] Frame {frame_num} could not be loaded (None)")
                 continue
-        except Exception:
+        except Exception as e:
+            print(f"[ERROR] ensure_cv_for_range failed to load frame {frame_num}: {e}")
             continue
 
         # Run CV
         detections = []
-        raw_results = ctx.cv_service.get_results_object(frame, ctx.batch_params.cv_confidence_threshold)
+        raw_results = None
         
-        if raw_results:
-            for box, cls_id, conf in zip(
-                raw_results.boxes.xyxy,
-                raw_results.boxes.cls,
-                raw_results.boxes.conf
-            ):
-                class_name = raw_results.names[int(cls_id)]
-                box_tuple = tuple(map(int, box.cpu().numpy()))
-                detections.append(Detection(class_name, float(conf), box_tuple))
+        if ctx.cv_service:
+            # Get full results object for caching
+            raw_results = ctx.cv_service.get_results_object(frame, ctx.batch_params.cv_confidence_threshold)
+            
+            # Extract detections for context
+            if raw_results:
+                for box, cls_id, conf in zip(
+                    raw_results.boxes.xyxy,
+                    raw_results.boxes.cls,
+                    raw_results.boxes.conf
+                ):
+                    class_name = raw_results.names[int(cls_id)]
+                    box_tuple = tuple(map(int, box.cpu().numpy()))
+                    detections.append(Detection(class_name, float(conf), box_tuple))
+            
+            if detections:
+                # print(f"[DEBUG] CV found {len(detections)} objects in frame {frame_num}: {[d.class_name for d in detections]}")
+                pass
+            else:
+                # print(f"[DEBUG] CV found 0 objects in frame {frame_num}")
+                pass
 
         # Update/Create Context
         if not c:
@@ -60,8 +90,15 @@ def ensure_cv_for_range(ctx: DecisionContext, start_frame: int, end_frame: int):
         
         c.detections = detections
         c.raw_results = raw_results
+        
+        if detections:
+            # print(f"[DEBUG] ensure_cv_for_range: Loaded {len(detections)} detections for frame {frame_num}")
+            pass
+        else:
+            # print(f"[DEBUG] ensure_cv_for_range: No detections for frame {frame_num}")
+            pass
 
-def aggregate_detections(ctx: DecisionContext, start_frame: int, end_frame: int) -> Dict[str, float]:
+def aggregate_detections(ctx: DecisionContext, start_frame: int, end_frame: int) -> Dict[str, Dict[str, float]]:
     """
     Helper to aggregate detections over a frame range.
     Returns a dict of {object_name: max_confidence}.
@@ -83,13 +120,27 @@ def aggregate_detections(ctx: DecisionContext, start_frame: int, end_frame: int)
                 aggregated_confidences[name].append(d.confidence)
                 object_frames_seen[name].add(f)
                 
-    # Calculate final scores
+    # Calculate final scores and frequency
     final_scores = {}
+    total_frames = end_frame - start_frame + 1
+    
+    # Avoid division by zero
+    if total_frames <= 0:
+        total_frames = 1
+        
     for name, confs in aggregated_confidences.items():
-        # Score = max_confidence * (frames_seen / total_frames_with_detections) ?
-        # Or just max confidence?
-        # Let's use max confidence for now, maybe boosted by frequency?
-        # Simple: Max confidence.
-        final_scores[name] = max(confs)
+        max_conf = max(confs)
+        frames_present = len(object_frames_seen[name])
+        frequency = frames_present / total_frames
+        
+        final_scores[name] = {
+            "confidence": max_conf,
+            "frequency": frequency,
+            "count": frames_present
+        }
+    
+    # print(f"[DEBUG] aggregate_detections: Processed {total_frames} frames. Found {len(final_scores)} unique objects.")
+    # if final_scores:
+    #     print(f"[DEBUG] Objects found: {list(final_scores.keys())}")
         
     return final_scores

@@ -36,11 +36,10 @@ class CVModel(str, Enum):
     CUSTOM_CV = "custom_cv"
 
 
-class ToolDetectionMethod(str, Enum):
-    LLM_DIRECT = "llm_direct"
-    LLM_WITH_CONTEXT = "llm_with_context"
-    CV_INFERENCE = "cv_inference"
-    HYBRID = "hybrid"
+
+
+
+
 
 
 class ActionClassificationMethod(str, Enum):
@@ -98,10 +97,12 @@ class StateCheckMethod(str, Enum):
     """How to determine action state"""
     MOTION_THRESHOLD = "motion_threshold"
     LLM_DIRECT = "llm_direct"
-    HYBRID_MOTION_THEN_LLM = "hybrid_motion_then_llm"
-    CV_OBJECTS_ONLY = "cv_objects_only"
     LEGACY_TESTING_CLASS = "legacy_testing_class"
+    HYBRID_MOTION_THEN_LLM = "hybrid_motion_then_llm"
     ACTION_MAPPING = "action_mapping"
+    LEGACY_SOFTENED = "legacy_softened"
+    LLM_MULTIFRAME = "llm_multiframe"
+    CV_OBJECTS_ONLY = "cv_objects_only"
 
 
 class ObjectCheckMethod(str, Enum):
@@ -112,10 +113,16 @@ class ObjectCheckMethod(str, Enum):
     LLM_WITH_CV_HINT = "llm_with_cv_hint"
     LLM_WITH_RELATIONSHIPS = "llm_with_relationships"
     LLM_STRICT = "llm_strict"
+    LLM_STRICT_SOFTENED = "llm_strict_softened"
+    LLM_STRICT_CONFIDENT = "llm_strict_confident"
+    LLM_TWO_STEP_RECHECK = "llm_two_step_recheck"
+    LLM_AGGREGATION_SOFTENED = "llm_aggregation_softened"
     LLM_WITH_INTERVAL_AGGREGATION = "llm_with_interval_aggregation"
     LLM_WITH_1SEC_AGGREGATION = "llm_with_1sec_aggregation"
     LEGACY_TESTING_CLASS = "legacy_testing_class"
+    LEGACY_SOFTENED = "legacy_softened"
     ACTION_MAPPING = "action_mapping"
+    LLM_MULTIFRAME = "llm_multiframe"
 
 
 class UnknownObjectCheckMethod(str, Enum):
@@ -125,6 +132,15 @@ class UnknownObjectCheckMethod(str, Enum):
     CV_CLASS_NAME = "cv_class_name"
     TEMPORAL_MAJORITY = "temporal_majority"
     SKIP = "skip"
+    LLM_RECHECK = "llm_recheck"
+
+
+class ToolDetectionMethod(str, Enum):
+    """Legacy - kept for backward compatibility"""
+    LLM_DIRECT = "llm_direct"
+    LLM_WITH_CONTEXT = "llm_with_context"
+    CV_INFERENCE = "cv_inference"
+    HYBRID = "hybrid"
 
 
 # ==========================================
@@ -207,9 +223,15 @@ class BatchParameters:
     num_frames_per_interval: int = 5
     include_neighbor_frames: bool = True
     cv_detection_frequency: int = 0
-    yolo_vid_frequency: int = 5  # Frequency of YOLO detection for video generation
+    yolo_vid_frequency: int = 5  # Frequency of YOLO detection for video
+    
+    # Temporal Smoothing
     enable_temporal_smoothing: bool = True
     temporal_smoothing_window: int = 9
+    
+    # Multi-Frame Context
+    multi_frame_count: int = 0  # Number of frames to include before/after (0 = single frame)
+    multi_frame_gap: int = 1    # Gap between context frames (1 = adjacent)
     motion_score_threshold_idle: float = 0.16
     motion_ignore_threshold: int = 5
     
@@ -221,6 +243,7 @@ class BatchParameters:
     
     # Keyframe Extraction Parameters
     keyframe_min_gap: int = 20
+    keyframe_max_gap: int = 500  # Force a keyframe every N frames even if no motion
     keyframe_threshold_multiplier: float = 1.0
     
     # ==========================================

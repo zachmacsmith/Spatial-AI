@@ -490,6 +490,7 @@ def extract_keyframes(
     output_dir: str,
     scale: float = 0.5,
     min_gap: int = 20,
+    max_gap: int = 300,
     threshold_multiplier: float = 1.0
 ) -> int:
     """
@@ -500,6 +501,7 @@ def extract_keyframes(
         output_dir: Directory to save keyframes
         scale: Resize factor for processing speed (default: 0.5)
         min_gap: Minimum frames between keyframes (default: 20)
+        max_gap: Maximum frames between keyframes (default: 300)
         threshold_multiplier: Multiplier for adaptive threshold (default: 1.0)
     
     Returns:
@@ -535,6 +537,9 @@ def extract_keyframes(
     saved_count += 1
     print(f"  Saved keyframe at frame 1")
     
+    last_frame_captured = None
+    last_frame_index = 0
+    
     while True:
         success, frame = cap.read()
         if not success:
@@ -542,6 +547,8 @@ def extract_keyframes(
         
         # Use 1-based indexing to match load_all_frames
         frame_index = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+        last_frame_captured = frame
+        last_frame_index = frame_index
         
         # Resize for speed
         frame_small = cv2.resize(frame, (0, 0), fx=scale, fy=scale)
@@ -560,14 +567,27 @@ def extract_keyframes(
         else:
             threshold = diff_val * 2
             
-        # Save keyframe if difference exceeds threshold and min_gap satisfied
+        # Determine if we should save
+        should_save = False
+        reason = ""
+        
+        # 1. Motion threshold check
         if diff_val > threshold and frame_index - last_saved > min_gap:
+            should_save = True
+            reason = "motion"
+            
+        # 2. Max gap check (force keyframe if too long since last one)
+        if frame_index - last_saved >= max_gap:
+            should_save = True
+            reason = "max_gap"
+            
+        if should_save:
             filename = os.path.join(output_dir, f"{frame_index}.jpg")
             cv2.imwrite(filename, frame)
             last_saved = frame_index
             saved_count += 1
-            if saved_count % 10 == 0:
-                print(f"  Saved keyframe at frame {frame_index}")
+            if saved_count % 10 == 0 or reason == "max_gap":
+                print(f"  Saved keyframe at frame {frame_index} ({reason})")
         
         prev_gray = frame_gray
     

@@ -22,7 +22,7 @@ class DecisionContext:
     cv_service: Any = None
     api_calls_used: int = 0
     
-    def call_llm(self, prompt: str, max_tokens: int = 50, valid_options: Optional[List[str]] = None, log_label: str = "LLM Call") -> str:
+    def call_llm(self, prompt: str, max_tokens: int = 50, valid_options: Optional[List[str]] = None, log_label: str = "LLM Call", frames: Optional[List[np.ndarray]] = None) -> str:
         """
         Wrapper for LLM calls that tracks usage.
         Increments self.api_calls_used.
@@ -41,8 +41,10 @@ class DecisionContext:
         # So we'll rely on the service to return the validated result,
         # but we'll print it clearly.
         
+        frames_to_use = frames if frames is not None else self.frames
+        
         result = self.llm_service.send_multiframe_prompt(
-            frames=self.frames,
+            frames=frames_to_use,
             prompt_text=prompt,
             max_tokens=max_tokens,
             valid_options=valid_options

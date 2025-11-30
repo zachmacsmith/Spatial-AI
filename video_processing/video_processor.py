@@ -40,6 +40,7 @@ from .output.output_manager import (
     save_batch_metadata
 )
 from .processing_strategies import get_processing_strategy
+from .batch_parameters import ObjectCheckMethod
 
 
 class RateLimiter:
@@ -99,27 +100,36 @@ def _precompute_keyframe_contexts(
     keyframe_numbers: List[int],
     frame_cache: Dict[int, np.ndarray],
     context_store: "ContextStore",
-    cv_service,
     batch_params,
     video_props,
-    relationship_tracker=None
+    cv_service=None,
+    relationship_tracker=None,
+    relationships_enabled: bool = False,
+    warnings: List[str] = None
 ) -> None:
     """
-    Pre-compute and store context for all keyframes.
-    Must run before classification so strategies can query history.
+    Pre-compute context (CV + Relationships) for all keyframes.
+    Populates the ContextStore.
     """
     from .context import FrameContext, Detection
     
     print(f"\nPhase 1: Pre-computing context...")
     
-    actual_frame_count = len(frame_cache)
+    # We don't have actual_frame_count here anymore, as it's not needed for the loop.
+    # The original code used it for a print statement, which can be removed or adjusted.
+    # For now, let's keep the print statement adjusted to keyframe_numbers length.
     
-    # Determine which frames to process
-    # Only process keyframes (Original behavior)
     print(f"  Processing {len(keyframe_numbers)} keyframes...")
     
     for kf_number in keyframe_numbers:
-        frame = get_frame_from_cache(frame_cache, kf_number)
+        try:
+            frame = get_frame_from_cache(frame_cache, kf_number)
+        except (ValueError, KeyError) as e:
+            msg = f"Skipping keyframe {kf_number}: {e}"
+            print(f"  ⚠ {msg}")
+            if warnings is not None:
+                warnings.append(msg)
+            continue
         
         # Run YOLO
         detections = []
@@ -163,7 +173,7 @@ def _precompute_keyframe_contexts(
         context_store.add(ctx)
         
         if kf_number % 50 == 0:
-            print(f"  Pre-computed {kf_number}/{actual_frame_count} frames")
+            print(f"  Pre-computed {kf_number}/{video_props.frame_count} frames")
             
     print("✓ Context pre-computation complete")
 
@@ -186,10 +196,11 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
         batch_params: BatchParameters instance
     
     Returns:
-        Dict mapping output_type -> file_path
+        Dict mapping output_type -> file_path (and 'warnings' -> List[str])
     """
     # Initialize performance tracker
     tracker = PerformanceTracker()
+    warnings = []
     
     start_time = time.time()
     
@@ -216,8 +227,9 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
     # If using custom settings, append them to folder name to avoid conflicts
     kf_folder_name = f"keyframes{video_name}"
     if (batch_params.keyframe_min_gap != 20 or 
+        batch_params.keyframe_max_gap != 300 or
         batch_params.keyframe_threshold_multiplier != 1.0):
-        kf_folder_name += f"_gap{batch_params.keyframe_min_gap}_thresh{batch_params.keyframe_threshold_multiplier}"
+        kf_folder_name += f"_gap{batch_params.keyframe_min_gap}_{batch_params.keyframe_max_gap}_thresh{batch_params.keyframe_threshold_multiplier}"
         
     keyframes_folder = os.path.join(batch_params.keyframes_directory, kf_folder_name)
     
@@ -238,6 +250,7 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
             video_path, 
             keyframes_folder,
             min_gap=batch_params.keyframe_min_gap,
+            max_gap=batch_params.keyframe_max_gap,
             threshold_multiplier=batch_params.keyframe_threshold_multiplier
         )
         keyframe_numbers = load_keyframe_numbers(keyframes_folder)
@@ -311,19 +324,18 @@ def process_video(video_name: str, batch_params) -> Dict[str, str]:
     # 2. PRE-COMPUTE CONTEXT (The "See" Phase)
     # ==========================================
     
-    # ==========================================
-    # 2. PRE-COMPUTE CONTEXT (The "See" Phase)
-    # ==========================================
-    
     tracker.start_section("precompute_context")
+    # Pre-compute context for all keyframes
     _precompute_keyframe_contexts(
         keyframe_numbers,
         frame_cache,
         context_store,
-        cv_service,
         batch_params,
         video_props,
-        relationship_tracker
+        cv_service=cv_service,
+        relationship_tracker=relationship_tracker,
+        relationships_enabled=(batch_params.object_check_method == ObjectCheckMethod.LLM_WITH_RELATIONSHIPS),
+        warnings=warnings
     )
     tracker.end_section("precompute_context")
     

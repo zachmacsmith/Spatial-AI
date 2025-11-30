@@ -94,7 +94,10 @@ def state_check_llm_direct(ctx: DecisionContext) -> str:
     prompt = (
         f"This is a POV of a construction worker.\n\n"
         f"{ctx.context_text}\n\n"
-        f"What is the worker doing? Respond with exactly one word from: {actions_str}."
+        f"CRITICAL INSTRUCTION: Identify the worker's action.\n"
+        f"You must respond with EXACTLY ONE of the following words: {actions_str}.\n"
+        f"Do NOT provide any reasoning, preamble, or extra text.\n"
+        f"Response:"
     )
     response = ctx.call_llm(prompt, valid_options=ctx.batch_params.allowed_actions, log_label="State Check (Direct)").lower()
     
@@ -184,6 +187,37 @@ def state_check_legacy(ctx: DecisionContext) -> str:
     else:
         return "uncertain"
 
+@register_state_check("legacy_softened")
+def state_check_legacy_softened(ctx: DecisionContext) -> str:
+    """
+    Replicate TestingClass.py logic but with softened prompt about idle/moving.
+    1 API call.
+    """
+    motion = ctx.frame_context.motion_score
+    motion_str = f"{motion:.2f}" if motion is not None else "unknown"
+    
+    actions_str = ", ".join(ctx.batch_params.allowed_actions)
+    prompt = (
+        f"This is a POV of a person. Motion score: {motion_str}, "
+        f"a motion score of 0-0.16 suggests the person is idle, "
+        f"10 or above suggests they are moving. "
+        f"Check if hands or tools are visible and classify behavior. "
+        f"If they appear to not be using tools, they might be idle or moving. "
+        f"Classify the action: {actions_str}. "
+        f"Respond with ONE word only."
+    )
+    
+    response = ctx.call_llm(prompt, valid_options=ctx.batch_params.allowed_actions, log_label="State Check (Legacy Softened)").lower()
+    
+    if "using tool" in response or "using_tool" in response:
+        return "using tool"
+    elif "moving" in response:
+        return "moving"
+    elif "idle" in response:
+        return "idle"
+    else:
+        return "uncertain"
+
 @register_state_check("action_mapping")
 def state_check_with_action_mapping(ctx: DecisionContext) -> str:
     """
@@ -230,6 +264,64 @@ def state_check_with_action_mapping(ctx: DecisionContext) -> str:
     else:
         return "uncertain"
 
+@register_state_check("llm_multiframe")
+def state_check_llm_multiframe(ctx: DecisionContext) -> str:
+    """
+    Ask LLM with multi-frame context (before/after frames).
+    1 API call.
+    """
+    # Prepare multi-frame context
+    current_frame_num = ctx.frame_context.frame_number
+    gap = ctx.batch_params.multi_frame_gap
+    count = ctx.batch_params.multi_frame_count
+    
+    frames_to_send = []
+    
+    # Previous frames
+    for i in range(count, 0, -1):
+        fn = current_frame_num - (i * gap)
+        if ctx.frame_cache:
+            frame = ctx.frame_cache.get(fn)
+            if frame is not None:
+                frames_to_send.append(frame)
+            
+    # Current frame(s)
+    frames_to_send.extend(ctx.frames)
+    
+    # Next frames
+    for i in range(1, count + 1):
+        fn = current_frame_num + (i * gap)
+        if ctx.frame_cache:
+            frame = ctx.frame_cache.get(fn)
+            if frame is not None:
+                frames_to_send.append(frame)
+                
+    # Explain context in prompt
+    actions_str = ", ".join([f"'{a}'" for a in ctx.batch_params.allowed_actions])
+    prompt = (
+        f"This is a POV of a construction worker. You are viewing a sequence of frames.\n"
+        f"The middle frame is the current moment. Previous and subsequent frames are provided for context.\n\n"
+        f"{ctx.context_text}\n\n"
+        f"What is the worker doing in the CURRENT (middle) frame? Respond with exactly one word from: {actions_str}."
+    )
+    
+    # Temporarily swap frames for the call
+    original_frames = ctx.frames
+    ctx.frames = frames_to_send
+    try:
+        response = ctx.call_llm(prompt, valid_options=ctx.batch_params.allowed_actions, log_label=f"State Check (Multi-Frame {len(frames_to_send)}f)").lower()
+    finally:
+        ctx.frames = original_frames
+    
+    if "using tool" in response or "using_tool" in response:
+        return "using tool"
+    elif "moving" in response:
+        return "moving"
+    elif "idle" in response:
+        return "idle"
+    else:
+        return "uncertain"
+
 # ==========================================
 # OBJECT CHECK IMPLEMENTATIONS
 # ==========================================
@@ -266,13 +358,89 @@ def object_check_llm(ctx: DecisionContext) -> str:
     Ask LLM to identify tool.
     1 API call.
     """
+    options_list = ctx.batch_params.allowed_tools
+    options_str = ", ".join([f"'{opt}'" for opt in options_list])
+
     prompt = (
         f"This is a POV of a construction worker using a tool.\n\n"
         f"{ctx.context_text}\n\n"
+        f"CRITICAL INSTRUCTION: Identify the tool being used.\n"
+        f"You must respond with EXACTLY ONE of the following words: {options_str}.\n"
+        f"Do NOT provide any reasoning, preamble, or extra text.\n"
+        f"If you are not 100% sure, or if the tool is not in the list, respond with 'unknown'.\n"
+        f"Response:"
+    )
+    response = ctx.call_llm(prompt, valid_options=options_list, log_label="Object Check (Direct)").lower().strip()
+    return response
+
+@register_object_check("llm_with_cv_hint")
+def object_check_llm_hint(ctx: DecisionContext) -> str:
+    """
+    Ask LLM but provide CV detections as hint.
+    1 API call.
+    """
+    ignored = {"person", "hand", "hardhat", "safety vest", "glove", "helmet", "vest", "face"}
+    tools = [d.class_name for d in ctx.frame_context.detections if d.class_name not in ignored]
+    hint = ", ".join(tools) if tools else "none"
+    
+    prompt = (
+        f"This is a POV of a construction worker using a tool.\n\n"
+        f"{ctx.context_text}\n\n"
+        f"CV Hint: {hint}\n"
         f"What tool are they using? Respond with the tool name only (e.g., 'drill', 'hammer'). "
         f"If you cannot identify it, respond with 'unknown'."
     )
-    response = ctx.call_llm(prompt, valid_options=ctx.batch_params.allowed_tools, log_label="Object Check (Direct)").lower().strip()
+    response = ctx.call_llm(prompt, valid_options=ctx.batch_params.allowed_tools, log_label="Object Check (Hint)").lower().strip()
+    return response
+
+@register_object_check("llm_multiframe")
+def object_check_llm_multiframe(ctx: DecisionContext) -> str:
+    """
+    Ask LLM to identify tool with multi-frame context.
+    1 API call.
+    """
+    # Prepare multi-frame context
+    current_frame_num = ctx.frame_context.frame_number
+    gap = ctx.batch_params.multi_frame_gap
+    count = ctx.batch_params.multi_frame_count
+    
+    frames_to_send = []
+    
+    # Previous frames
+    for i in range(count, 0, -1):
+        fn = current_frame_num - (i * gap)
+        if ctx.frame_cache:
+            frame = ctx.frame_cache.get(fn)
+            if frame is not None:
+                frames_to_send.append(frame)
+            
+    # Current frame(s)
+    frames_to_send.extend(ctx.frames)
+    
+    # Next frames
+    for i in range(1, count + 1):
+        fn = current_frame_num + (i * gap)
+        if ctx.frame_cache:
+            frame = ctx.frame_cache.get(fn)
+            if frame is not None:
+                frames_to_send.append(frame)
+    
+    prompt = (
+        f"This is a POV of a construction worker using a tool. You are viewing a sequence of frames.\n"
+        f"The middle frame is the current moment.\n\n"
+        f"{ctx.context_text}\n\n"
+        f"What tool are they using in the CURRENT (middle) frame? Respond with the tool name only (e.g., 'drill', 'hammer'). "
+        f"If you cannot identify it, respond with 'unknown'."
+    )
+    
+    # Temporarily swap frames for the call
+    original_frames = ctx.frames
+    ctx.frames = frames_to_send
+    try:
+        response = ctx.call_llm(prompt, valid_options=ctx.batch_params.allowed_tools, log_label=f"Object Check (Multi-Frame {len(frames_to_send)}f)").lower().strip()
+    finally:
+        ctx.frames = original_frames
+        
     return response
 
 @register_object_check("cv_then_llm")
@@ -398,6 +566,281 @@ def object_check_strict(ctx: DecisionContext) -> str:
     return ctx.call_llm(prompt, valid_options=options_list, log_label="Object Check (Strict)").lower().strip()
 
 
+@register_object_check("llm_strict_softened")
+def object_check_strict_softened(ctx: DecisionContext) -> str:
+    """
+    Ask LLM with strict constraints but softened uncertainty phrasing.
+    1 API call.
+    """
+    # 1. Get CV detections for context (optional, but helpful)
+    ignored = {"person", "hand", "hardhat", "safety vest", "glove", "helmet", "vest", "face"}
+    tools = [d.class_name for d in ctx.frame_context.detections if d.class_name not in ignored]
+    hint = ", ".join(tools) if tools else "none"
+    
+    options_list = ctx.batch_params.allowed_tools
+    options_str = ", ".join([f"'{opt}'" for opt in options_list])
+    
+    prompt = (
+        f"This is a POV of a construction worker using a tool.\n\n"
+        f"Object detection suggests: {hint}\n\n"
+        f"{ctx.context_text}\n\n"
+        f"CRITICAL INSTRUCTION: Identify the tool being used.\n"
+        f"You must respond with EXACTLY ONE of the following words: {options_str}.\n"
+        f"Do NOT provide any reasoning, preamble, or extra text.\n"
+        f"If the answer provides unclear, may be more than one of the tools, or a different one altogether, say 'unknown'.\n"
+        f"Response:"
+    )
+    return ctx.call_llm(prompt, valid_options=options_list, log_label="Object Check (Strict Softened)").lower().strip()
+
+
+    return ctx.call_llm(prompt, valid_options=options_list, log_label="Object Check (Strict Softened)").lower().strip()
+
+
+@register_object_check("llm_aggregation_softened")
+def object_check_aggregation_softened(ctx: DecisionContext) -> str:
+    """
+    Aggregate detections since the last keyframe, map 'saw' -> 'power saw', 
+    and use softened uncertainty phrasing.
+    """
+    current_frame = ctx.frame_context.frame_number
+    
+    # Find previous keyframe to define the interval
+    start_frame = 1
+    for f in range(current_frame - 1, 0, -1):
+        c = ctx.context_store.get(f)
+        if c and c.action:
+            start_frame = f
+            break
+            
+    # Ensure minimum aggregation window for dense classification strategies
+    min_lookback = 30
+    if current_frame - start_frame < min_lookback:
+        start_frame = max(1, current_frame - min_lookback)
+            
+    end_frame = current_frame
+    
+    ensure_cv_for_range(ctx, start_frame, end_frame)
+    
+    # Refresh frame_context from store
+    refreshed_context = ctx.context_store.get(current_frame)
+    if refreshed_context:
+        ctx.frame_context = refreshed_context
+    
+    # 1. Current Frame Detections
+    current_objects = []
+    if ctx.frame_context.detections:
+        ignored = {"person", "hardhat", "safety vest", "glove", "helmet", "vest", "face"}
+        for d in ctx.frame_context.detections:
+            if d.class_name.lower() not in ignored:
+                name = d.class_name
+                # Map "saw" -> "power saw"
+                if name.lower() == "saw":
+                    name = "power saw"
+                current_objects.append(f"{name} ({d.confidence:.2f})")
+    
+    current_hint = ", ".join(current_objects) if current_objects else "none"
+
+    # 2. Aggregated Detections (Previous Interval)
+    agg_end = max(start_frame, end_frame - 1)
+    
+    if agg_end < start_frame:
+        aggregated_scores = {}
+    else:
+        aggregated_scores = aggregate_detections(ctx, start_frame, agg_end)
+    
+    if aggregated_scores:
+        # Sort by frequency first, then confidence
+        sorted_items = sorted(aggregated_scores.items(), key=lambda x: (x[1]['frequency'], x[1]['confidence']), reverse=True)
+        
+        agg_hints = []
+        for obj, stats in sorted_items:
+            name = obj
+            # Map "saw" -> "power saw"
+            if name.lower() == "saw":
+                name = "power saw"
+                
+            conf = stats['confidence']
+            freq = stats['frequency']
+            agg_hints.append(f"{name} ({conf:.2f} conf, {freq:.0%} of frames)")
+            
+        agg_hint = ", ".join(agg_hints)
+    else:
+        agg_hint = "none"
+    
+    options_list = ctx.batch_params.allowed_tools
+    options_str = ", ".join([f"'{opt}'" for opt in options_list])
+    
+    # Filter out redundant "Objects:" line and "No objects detected." from context_text
+    filtered_context = "\n".join([
+        line for line in ctx.context_text.split('\n') 
+        if not line.strip().startswith("Objects:") and "No objects detected." not in line
+    ])
+    
+    prompt = (
+        f"This is a POV of a construction worker using a tool.\n\n"
+       
+        f"CRITICAL INSTRUCTION: Identify the tool being used.\n"
+        f"You must respond with EXACTLY ONE of the following words: {options_str}.\n"
+        f"Do NOT provide any reasoning, preamble, or extra text.\n"
+        f"If the answer provides unclear, may be more than one of the tools, or a different one altogether, say 'unknown'.\n"
+        f"Objects identified in CURRENT frame: {current_hint}\n"
+        f"Objects identified in PREVIOUS interval: {agg_hint}\n"
+        f"{filtered_context}\n\n"
+        f"Response:"
+    )
+    return ctx.call_llm(prompt, valid_options=options_list, log_label="Object Check (Agg Softened)").lower().strip()
+
+
+@register_object_check("llm_strict_confident")
+def object_check_strict_confident(ctx: DecisionContext) -> str:
+    """
+    Ask LLM with strict constraints and explicit confidence instruction.
+    1 API call.
+    """
+    # 1. Get CV detections for context (optional, but helpful)
+    ignored = {"person", "hand", "hardhat", "safety vest", "glove", "helmet", "vest", "face"}
+    tools = [d.class_name for d in ctx.frame_context.detections if d.class_name not in ignored]
+    hint = ", ".join(tools) if tools else "none"
+    
+    options_list = ctx.batch_params.allowed_tools
+    options_str = ", ".join([f"'{opt}'" for opt in options_list])
+    
+    prompt = (
+        f"This is a POV of a construction worker using a tool.\n\n"
+        f"Object detection suggests: {hint}\n\n"
+        f"{ctx.context_text}\n\n"
+        f"CRITICAL INSTRUCTION: Identify the tool being used.\n"
+        f"You must respond with EXACTLY ONE of the following words: {options_str}.\n"
+        f"Do NOT provide any reasoning, preamble, or extra text.\n"
+        f"ONLY CHOOSE A TOOL IF YOU ARE VERY CONFIDENT, and if there is ANY UNCERTAINTY select 'unknown'.\n"
+        f"Response:"
+    )
+    return ctx.call_llm(prompt, valid_options=options_list, log_label="Object Check (Strict Confident)").lower().strip()
+
+
+@register_object_check("llm_two_step_recheck")
+def object_check_two_step_recheck(ctx: DecisionContext) -> str:
+    """
+    Two-step process:
+    1. Strict check (current frame only).
+    2. If unknown, Recheck with Aggregation (1 sec lookback) AND multiframe visual context.
+    """
+    # Step 1: Strict Check with Confidence Instruction
+    result = object_check_strict_confident(ctx)
+    
+    if result != "unknown":
+        return result
+        
+    # Step 2: Recheck with Aggregation AND Multiframe Context
+    print(">> Step 1 returned 'unknown'. Rechecking with aggregation and multiframes...")
+    
+    # Fetch frames for the last 2 seconds
+    current_frame = ctx.frame_context.frame_number
+    fps = ctx.context_store.fps
+    start_frame = max(1, int(current_frame - (2 * fps)))
+    
+    # Sample ~10 frames from this interval
+    frame_numbers = np.linspace(start_frame, current_frame, num=10, dtype=int).tolist()
+    frame_numbers = sorted(list(set(frame_numbers))) # Deduplicate and sort
+    
+    recheck_frames = []
+    if ctx.frame_cache:
+        for fn in frame_numbers:
+            frame = ctx.frame_cache.get(fn)
+            if frame is not None:
+                recheck_frames.append(frame)
+    
+    # Fallback to current frame if cache miss or empty
+    if not recheck_frames:
+        recheck_frames = ctx.frames
+        
+    # We need to call object_check_aggregation_softened but pass these frames.
+    # Since object_check_aggregation_softened calls ctx.call_llm internally,
+    # we can't easily inject frames unless we modify that function too OR
+    # we manually construct the call here.
+    
+    # Manually constructing the call to ensure frames are passed:
+    # Reuse logic from aggregation_softened but call llm with specific frames
+    
+    # ... Wait, better to refactor aggregation_softened to accept optional frames?
+    # Or just copy the logic since it's short?
+    # Let's copy and adapt to ensure we pass the frames.
+    
+    # 1. Aggregation Logic (Same as aggregation_softened)
+    # Find previous keyframe to define the interval
+    agg_start_frame = 1
+    for f in range(current_frame - 1, 0, -1):
+        c = ctx.context_store.get(f)
+        if c and c.action:
+            agg_start_frame = f
+            break
+            
+    # Ensure at least 2 seconds of lookback for aggregation stats too
+    min_lookback = int(2 * fps)
+    if current_frame - agg_start_frame < min_lookback:
+        agg_start_frame = max(1, current_frame - min_lookback)
+            
+    end_frame = current_frame
+    ensure_cv_for_range(ctx, agg_start_frame, end_frame)
+    
+    # Refresh frame_context
+    refreshed_context = ctx.context_store.get(current_frame)
+    if refreshed_context:
+        ctx.frame_context = refreshed_context
+    
+    # Current Detections
+    current_objects = []
+    if ctx.frame_context.detections:
+        ignored = {"person", "hardhat", "safety vest", "glove", "helmet", "vest", "face"}
+        for d in ctx.frame_context.detections:
+            if d.class_name.lower() not in ignored:
+                name = d.class_name
+                if name.lower() == "saw": name = "power saw"
+                current_objects.append(f"{name} ({d.confidence:.2f})")
+    current_hint = ", ".join(current_objects) if current_objects else "none"
+
+    # Aggregated Detections
+    agg_end = max(agg_start_frame, end_frame - 1)
+    if agg_end < agg_start_frame:
+        aggregated_scores = {}
+    else:
+        aggregated_scores = aggregate_detections(ctx, agg_start_frame, agg_end)
+    
+    if aggregated_scores:
+        sorted_items = sorted(aggregated_scores.items(), key=lambda x: (x[1]['frequency'], x[1]['confidence']), reverse=True)
+        agg_hints = []
+        for obj, stats in sorted_items:
+            name = obj
+            if name.lower() == "saw": name = "power saw"
+            agg_hints.append(f"{name} ({stats['confidence']:.2f} conf, {stats['frequency']:.0%} of frames)")
+        agg_hint = ", ".join(agg_hints)
+    else:
+        agg_hint = "none"
+    
+    options_list = ctx.batch_params.allowed_tools
+    options_str = ", ".join([f"'{opt}'" for opt in options_list])
+    
+    filtered_context = "\n".join([
+        line for line in ctx.context_text.split('\n') 
+        if not line.strip().startswith("Objects:") and "No objects detected." not in line
+    ])
+    
+    prompt = (
+        f"This is a POV of a construction worker using a tool.\n\n"
+        f"CRITICAL INSTRUCTION: Identify the tool being used.\n"
+        f"You must respond with EXACTLY ONE of the following words: {options_str}.\n"
+        f"Do NOT provide any reasoning, preamble, or extra text.\n"
+        f"If the answer provides unclear, may be more than one of the tools, or a different one altogether, say 'unknown'.\n"
+        f"Objects identified in CURRENT frame: {current_hint}\n"
+        f"Objects identified in PREVIOUS interval: {agg_hint}\n"
+        f"{filtered_context}\n\n"
+        f"Response:"
+    )
+    
+    # Pass the sampled frames here!
+    return ctx.call_llm(prompt, valid_options=options_list, log_label="Object Check (Recheck Multiframe)", frames=recheck_frames).lower().strip()
+
+
 @register_object_check("llm_with_interval_aggregation")
 def object_check_interval_aggregation(ctx: DecisionContext) -> str:
     """
@@ -413,9 +856,22 @@ def object_check_interval_aggregation(ctx: DecisionContext) -> str:
             start_frame = f
             break
             
+    # CRITICAL FIX: Ensure minimum aggregation window for dense classification strategies
+    # If the found start_frame is too close (e.g. just 1 frame ago), look back further.
+    min_lookback = 30
+    if current_frame - start_frame < min_lookback:
+        start_frame = max(1, current_frame - min_lookback)
+            
     end_frame = current_frame
     
     ensure_cv_for_range(ctx, start_frame, end_frame)
+    
+    # CRITICAL FIX: Refresh frame_context from store because ensure_cv_for_range 
+    # might have updated it (or created a new one if it was missing/empty).
+    # The ctx.frame_context object might be stale if it was a copy or if the store replaced it.
+    refreshed_context = ctx.context_store.get(current_frame)
+    if refreshed_context:
+        ctx.frame_context = refreshed_context
     
     # 1. Current Frame Detections
     current_objects = []
@@ -431,6 +887,9 @@ def object_check_interval_aggregation(ctx: DecisionContext) -> str:
     # 2. Aggregated Detections (Previous Interval)
     # We aggregate up to current_frame - 1 to separate past context
     agg_end = max(start_frame, end_frame - 1)
+    
+    # print(f"[DEBUG] Interval Aggregation: Current={current_frame}, Interval=[{start_frame}, {agg_end}]")
+    
     if agg_end < start_frame:
         # Interval is empty (start_frame == end_frame)
         aggregated_scores = {}
@@ -438,16 +897,27 @@ def object_check_interval_aggregation(ctx: DecisionContext) -> str:
         aggregated_scores = aggregate_detections(ctx, start_frame, agg_end)
     
     if aggregated_scores:
-        sorted_items = sorted(aggregated_scores.items(), key=lambda x: x[1], reverse=True)
-        agg_hint = ", ".join([f"{obj} ({score:.2f})" for obj, score in sorted_items])
+        # Sort by frequency first, then confidence
+        sorted_items = sorted(aggregated_scores.items(), key=lambda x: (x[1]['frequency'], x[1]['confidence']), reverse=True)
+        
+        agg_hints = []
+        for obj, stats in sorted_items:
+            conf = stats['confidence']
+            freq = stats['frequency']
+            agg_hints.append(f"{obj} ({conf:.2f} conf, {freq:.0%} of frames)")
+            
+        agg_hint = ", ".join(agg_hints)
     else:
         agg_hint = "none"
     
     options_list = ctx.batch_params.allowed_tools
     options_str = ", ".join([f"'{opt}'" for opt in options_list])
     
-    # Filter out redundant "Objects:" line from context_text
-    filtered_context = "\n".join([line for line in ctx.context_text.split('\n') if not line.strip().startswith("Objects:")])
+    # Filter out redundant "Objects:" line and "No objects detected." from context_text
+    filtered_context = "\n".join([
+        line for line in ctx.context_text.split('\n') 
+        if not line.strip().startswith("Objects:") and "No objects detected." not in line
+    ])
     
     prompt = (
         f"This is a POV of a construction worker using a tool.\n\n"
@@ -501,8 +971,11 @@ def object_check_1sec_aggregation(ctx: DecisionContext) -> str:
     options_list = ctx.batch_params.allowed_tools
     options_str = ", ".join([f"'{opt}'" for opt in options_list])
     
-    # Filter out redundant "Objects:" line from context_text
-    filtered_context = "\n".join([line for line in ctx.context_text.split('\n') if not line.strip().startswith("Objects:")])
+    # Filter out redundant "Objects:" line and "No objects detected." from context_text
+    filtered_context = "\n".join([
+        line for line in ctx.context_text.split('\n') 
+        if not line.strip().startswith("Objects:") and "No objects detected." not in line
+    ])
     
     prompt = (
         f"This is a POV of a construction worker using a tool.\n\n"
