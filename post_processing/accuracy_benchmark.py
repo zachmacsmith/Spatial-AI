@@ -598,6 +598,11 @@ def run_benchmark(videos_to_process, batch_name, model_version, notes="", model_
     obj_total_dur = obj_df['total_time'].sum()
     weighted_avg_obj = (obj_df['object_accuracy'] * obj_df['total_time']).sum() / obj_total_dur if obj_total_dur > 0 else 0
 
+    # Weighted Speed Ratio
+    speed_df = results_df.dropna(subset=['speed_ratio'])
+    speed_total_dur = speed_df['total_time'].sum()
+    weighted_avg_speed = (speed_df['speed_ratio'] * speed_df['total_time']).sum() / speed_total_dur if speed_total_dur > 0 else 0
+
     # Readme
     with open(os.path.join(RESULTS_DIR, "readme.txt"), 'w') as f:
         f.write(f"BENCHMARK RESULTS ({metric_name.upper()})\n")
@@ -614,6 +619,8 @@ def run_benchmark(videos_to_process, batch_name, model_version, notes="", model_
     return {
         'avg_state_accuracy': weighted_avg_state,
         'avg_object_accuracy': weighted_avg_obj,
+        'avg_speed_ratio': weighted_avg_speed,
+        'total_duration': total_dur,
         'batch_id': batch_id,
         'batch_params': batch_params,
         'metric_label': metric_name,
