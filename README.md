@@ -47,9 +47,9 @@ python benchmark_existing.py
 ```
 
 This tool will:
-1. List all processed batches
-2. Calculate accuracy metrics (State, Object, Guess)
-3. Generate accuracy charts
+1. List all processed batches (individual and grouped)
+2. Calculate accuracy metrics (State, Object, Guess) and F1 Scores (Macro, Micro, GT-Only)
+3. Generate accuracy charts, including **Confusion Matrices** and **Over/Under Analysis**
 4. Output detailed CSV reports to `benchmark_results/`
 
 ---
@@ -89,12 +89,15 @@ It demonstrates:
 The system comes with several tuned presets:
 
 - **Legacy + Temporal Majority** (`legacy_temporal`): **(Recommended)** Replicates the original logic but uses temporal majority voting to identify unknown objects.
-- **Power Saw Recheck (Haiku)** (`power_saw_recheck_haiku`): **(New)** Specialized for power saws. Uses a two-step recheck process: strict initial check, followed by a multiframe aggregation recheck if unknown.
-- **Power Saw Strict (Haiku)** (`power_saw_haiku`): Strict object detection with aggregation, optimized for power saws.
+- **Power Saw Recheck (Haiku)** (`power_saw_recheck_haiku`): **(New)** Specialized for power saws. Uses a two-step recheck process.
+- **Sensitive Strict Enhanced (Haiku)** (`sensitive_strict_enhanced_haiku`): **(New)** High-frequency sampling with strict prompting, optimized for rapid actions.
+- **Raw LLM (Sonnet)** (`raw_llm_sonnet`): Direct LLM calls without heuristics, useful for baseline comparison.
 - **Legacy** (`legacy`): Exact replication of the original `TestingClass.py` logic.
 - **Balanced** (`balanced`): Hybrid approach using Motion/CV first, falling back to LLM. Good trade-off.
 - **Thorough** (`thorough`): Maximum accuracy using LLM for all decisions. High cost.
 - **Cheap** (`cheap`): Lowest cost using only Motion Threshold and CV. No LLM costs.
+
+> **See [Presets Guide](docs/guides/presets_guide.md) for the full list of 20+ presets.**
 
 ---
 
@@ -114,6 +117,17 @@ outputs/
 │       └── video_01.mp4                  # Labeled video
 └── batch_tracking/
     └── batch_20251128_...json            # Batch configuration
+
+benchmark_results/
+├── batch_20251128_.../                   # Detailed reports per batch
+│   ├── confusion_matrix_state.png
+│   ├── confusion_matrix_object.png
+│   └── report.csv
+└── comparisons/                          # Comparison charts
+    └── 20251202_.../
+        ├── state_accuracy_comparison.png
+        └── ...
+
 ```
 
 ---
@@ -160,7 +174,7 @@ print(f"Results saved to: {outputs['actions_csv']}")
 **Option B: Use Batch Processor (Interactive)**
 
 ```bash
-python batch_process.py
+python run_batch.py
 ```
 
 ---
@@ -367,7 +381,7 @@ results, charts = run_benchmark(
 CompleteModel_Agentic/
 ├── README.md                  # This file
 ├── config.py                  # API keys (create this)
-├── batch_process.py           # Interactive batch processor
+├── run_batch.py               # Interactive batch processor
 ├── example_usage.py           # Usage examples
 │
 ├── video_processing/          # Core processing code
