@@ -30,7 +30,7 @@ def get_batch_params() -> BatchParameters:
         
         # DENSE KEYFRAME SETTINGS
         # Sensitive to motion (0.8) and frequent sampling (min 5, max 150)
-        keyframe_min_gap=5,
+        keyframe_min_gap=15,
         keyframe_max_gap=150, # Force keyframe every 5 seconds
         keyframe_threshold_multiplier=0.8,
         

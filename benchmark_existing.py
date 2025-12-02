@@ -8,6 +8,7 @@ import os
 import sys
 from pathlib import Path
 from datetime import datetime
+from collections import defaultdict
 
 def find_batch_folders():
     """Find all batch folders in outputs/data/"""
@@ -132,13 +133,21 @@ def main():
     # --- Metric Selection ---
     print("\nSelect Accuracy Measure:")
     print("  1 - Traditional (Standard Accuracy)")
-    print("  2 - F1-Weighted (Macro F1 Score - Recommended for Imbalanced Data)")
-    metric_choice = input("Select option (1/2): ").strip()
+    print("  2 - Macro-F1 (Average of per-class F1s - Good for rare classes)")
+    print("  3 - Micro-F1 (Global Average - Balances hallucinations vs. detection)")
+    print("  4 - Macro-F1 (GT Classes Only - Ignores hallucinations of non-existent classes)")
+    metric_choice = input("Select option (1/2/3/4): ").strip()
     
     metric_mode = "traditional"
     if metric_choice == '2':
-        metric_mode = "f1_weighted"
-        print(">> Selected: F1-Weighted Mode")
+        metric_mode = "macro_f1"
+        print(">> Selected: Macro-F1 Mode")
+    elif metric_choice == '3':
+        metric_mode = "micro_f1"
+        print(">> Selected: Micro-F1 Mode")
+    elif metric_choice == '4':
+        metric_mode = "macro_f1_gt_only"
+        print(">> Selected: Macro-F1 (GT Only) Mode")
     else:
         print(">> Selected: Traditional Accuracy Mode")
     
@@ -154,7 +163,7 @@ def main():
         if perf_choice == '3': generate_over_under = True
         
     try:
-        from post_processing.accuracy_benchmark import run_benchmark, generate_comparison_charts, generate_performance_comparison_charts
+        from post_processing.accuracy_benchmark import run_benchmark, generate_comparison_charts, generate_performance_comparison_charts, generate_per_video_accuracy_comparison_charts, generate_over_under_charts, generate_confusion_matrix, generate_f1_breakdown_chart
     except ImportError as e:
         print(f"❌ Error importing benchmark: {e}"); return
     
@@ -178,7 +187,8 @@ def main():
                         config = json.load(f)
                         if 'llm_model' in config: model_version = config['llm_model']
                         if 'config_description' in config: notes = config['config_description']
-            except: pass
+                        preset_name = config.get('preset_name', 'N/A')
+            except: preset_name = 'N/A'
 
             print("\n" + "=" * 70)
             print(f"Benchmarking: {batch_id} ({metric_mode})")
@@ -194,7 +204,8 @@ def main():
                     batch_id=batch_id,
                     performance_mode=performance_mode,
                     generate_over_under=generate_over_under,
-                    metric_mode=metric_mode
+                    metric_mode=metric_mode,
+                    preset_name=preset_name
                 )
                 if result: all_benchmark_results.append(result)
             except Exception as e:
@@ -208,6 +219,17 @@ def main():
             print("=" * 70)
             
             group_results = []
+            
+            # Aggregators for Group
+            group_agg_over_under = {
+                'tool_over': defaultdict(float), 'tool_under': defaultdict(float), 'tool_correct': defaultdict(float),
+                'state_over': defaultdict(float), 'state_under': defaultdict(float), 'state_correct': defaultdict(float)
+            }
+            group_total_dur = 0
+            group_agg_confusion = {
+                'pred_state': [], 'gt_state': [],
+                'pred_object': [], 'gt_object': []
+            }
             
             # Run benchmark for each batch individually
             for batch_folder in group:
@@ -225,7 +247,8 @@ def main():
                             config = json.load(f)
                             if 'llm_model' in config: model_version = config['llm_model']
                             if 'config_description' in config: notes = config['config_description']
-                except: pass
+                            preset_name = config.get('preset_name', 'N/A')
+                except: preset_name = 'N/A'
                 
                 print(f"\n--- Processing Sub-Batch: {batch_id} ---")
                 try:
@@ -239,9 +262,21 @@ def main():
                         batch_id=batch_id,
                         performance_mode="none", # Minimal output for sub-batches
                         generate_over_under=False,
-                        metric_mode=metric_mode
+                        metric_mode=metric_mode,
+                        preset_name=preset_name
                     )
-                    if result: group_results.append(result)
+                    if result: 
+                        group_results.append(result)
+                        # Aggregate Over/Under
+                        if 'agg_over_under' in result:
+                            for k in group_agg_over_under:
+                                for item, val in result['agg_over_under'][k].items(): group_agg_over_under[k][item] += val
+                        group_total_dur += result.get('total_agg_dur', 0)
+                        
+                        # Aggregate Confusion
+                        if 'agg_confusion' in result:
+                            for k in group_agg_confusion:
+                                group_agg_confusion[k].extend(result['agg_confusion'][k])
                 except Exception as e:
                     print(f"❌ Error in sub-batch {batch_id}: {e}")
 
@@ -335,16 +370,85 @@ def main():
             # but Accuracy charts will definitely use the weighted logic we just wrote.
             
             all_benchmark_results.append(synthetic_result)
+            # Generate Grouped Charts
+            if group_results:
+                # Create Group Folder
+                # Use first batch name + count or something unique?
+                # Or just a timestamped folder inside grouped_batches
+                group_name = f"group_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{len(group)}_batches"
+                # Or better, list the batch IDs if not too long
+                # Let's use the first batch ID + "_and_others"
+                group_name = f"{first_res['batch_id']}_group"
+                
+                base = "benchmark_results"
+                if metric_mode == "macro_f1": base = "benchmark_results_f1"
+                elif metric_mode == "micro_f1": base = "benchmark_results_micro_f1"
+                elif metric_mode == "macro_f1_gt_only": base = "benchmark_results_f1_gt_only"
+                
+                group_dir = f"{base}/comparisons/grouped_batches/{group_name}"
+                os.makedirs(group_dir, exist_ok=True)
+                
+                print(f"\nGenerating Detailed Charts for Group: {group_dir}")
+                
+                # Over/Under
+                allowed = [t.lower() for t in first_res['batch_params'].allowed_tools] if first_res.get('batch_params') else None
+                generate_over_under_charts(group_agg_over_under, group_total_dur, group_dir, allowed_tools=allowed)
+                
+                # Confusion Matrices
+                generate_confusion_matrix(group_agg_confusion['gt_state'], group_agg_confusion['pred_state'], 
+                                          group_dir, "State Confusion Matrix (Recall Normalized)", "confusion_matrix_state.png")
+                generate_confusion_matrix(group_agg_confusion['gt_object'], group_agg_confusion['pred_object'], 
+                                          group_dir, "Object Confusion Matrix (Recall Normalized)", "confusion_matrix_object.png")
+                
+                # F1 Breakdown (Recalculate global F1 for group)
+                # We need to recalculate F1 from the aggregated over/under counts
+                # This logic is duplicated from accuracy_benchmark.py but necessary here for the group
+                
+                # State F1
+                g_state_f1 = {}
+                valid_states = set(group_agg_over_under['state_correct'].keys()) | set(group_agg_over_under['state_over'].keys()) | set(group_agg_over_under['state_under'].keys())
+                valid_states = [s for s in valid_states if s != 'unknown']
+                for s in valid_states:
+                    tp = group_agg_over_under['state_correct'][s]
+                    fp = group_agg_over_under['state_over'][s]
+                    fn = group_agg_over_under['state_under'][s]
+                    prec = tp/(tp+fp) if (tp+fp)>0 else 0
+                    rec = tp/(tp+fn) if (tp+fn)>0 else 0
+                    f1 = 2*(prec*rec)/(prec+rec) if (prec+rec)>0 else 0
+                    g_state_f1[s] = f1
+                generate_f1_breakdown_chart(g_state_f1, group_dir, f"Group State F1 Breakdown", "f1_breakdown_state.png")
+
+                # Object F1
+                g_obj_f1 = {}
+                valid_tools = set(group_agg_over_under['tool_correct'].keys()) | set(group_agg_over_under['tool_over'].keys()) | set(group_agg_over_under['tool_under'].keys())
+                valid_tools = [t for t in valid_tools if t != 'unknown']
+                for t in valid_tools:
+                    tp = group_agg_over_under['tool_correct'][t]
+                    fp = group_agg_over_under['tool_over'][t]
+                    fn = group_agg_over_under['tool_under'][t]
+                    prec = tp/(tp+fp) if (tp+fp)>0 else 0
+                    rec = tp/(tp+fn) if (tp+fn)>0 else 0
+                    f1 = 2*(prec*rec)/(prec+rec) if (prec+rec)>0 else 0
+                    g_obj_f1[t] = f1
+                generate_f1_breakdown_chart(g_obj_f1, group_dir, f"Group Object F1 Breakdown", "f1_breakdown_object.png")
+                
+                print(f"✓ Detailed Group Charts saved.")
+
             print(f"\n>> Group Result: State={weighted_state:.2%}, Object={weighted_obj:.2%}")
 
     if len(all_benchmark_results) > 1:
         print("\n" + "=" * 70); print("GENERATING COMPARISON CHARTS"); print("=" * 70)
         # Separate output folder for F1 comparisons
-        base = "benchmark_results_f1" if metric_mode == "f1_weighted" else "benchmark_results"
+        base = "benchmark_results"
+        if metric_mode == "macro_f1": base = "benchmark_results_f1"
+        elif metric_mode == "micro_f1": base = "benchmark_results_micro_f1"
+        elif metric_mode == "macro_f1_gt_only": base = "benchmark_results_f1_gt_only"
+        
         comp_dir = f"{base}/comparisons/{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
         try:
             generate_comparison_charts(all_benchmark_results, comp_dir, metric_label=all_benchmark_results[0]['metric_label'])
+            generate_per_video_accuracy_comparison_charts(all_benchmark_results, comp_dir, metric_label=all_benchmark_results[0]['metric_label'])
             print(f"\n✓ Comparison charts saved to: {comp_dir}")
             if performance_mode != "none":
                 generate_performance_comparison_charts(all_benchmark_results, comp_dir)
